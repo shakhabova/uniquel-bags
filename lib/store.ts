@@ -1,0 +1,5 @@
+import {env} from 'cloudflare:workers';
+import {samples,type Product} from './products';
+export async function database(){const db=env.DB;if(!db)throw new Error('Хранилище товаров временно недоступно');await db.prepare('CREATE TABLE IF NOT EXISTS products (id TEXT PRIMARY KEY NOT NULL, data TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0)').run();return db;}
+export async function listProducts(includeArchived=false){const db=await database(); const count=await db.prepare('SELECT COUNT(*) AS count FROM products').first<{count:number}>();if(count?.count===0)await seedSamples(); const rows=await db.prepare(includeArchived?'SELECT * FROM products':'SELECT * FROM products WHERE archived = 0').all<{id:string;data:string;archived:number}>();return (rows.results||[]).map(r=>({...JSON.parse(r.data),archived:Boolean(r.archived)})) as Product[];}
+export async function seedSamples(){const db=await database();await db.batch(samples.map(p=>db.prepare('INSERT OR IGNORE INTO products (id,data,archived) VALUES (?,?,0)').bind(p.id,JSON.stringify(p))));}
