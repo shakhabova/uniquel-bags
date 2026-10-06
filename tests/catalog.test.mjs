@@ -10,6 +10,34 @@ async function load(filename){filename=path.resolve(filename);if(cache.has(filen
 const paths=['lib/products.ts','app/api/products/route.ts','app/api/products/[id]/route.ts','app/api/upload/route.ts','app/api/images/[key]/route.ts'];const mods=[];for(const p of paths){const m=await load(p);await m.evaluate();mods.push(m.namespace)}const [model,products,item,upload,images]=mods;
 const base={name:'Test bag',category:'Сумки',material:'Экокожа',colors:['Чёрный'],price:0.29,oldPrice:null,description:'Test description',image:'https://example.com/bag.jpg',stock:'В наличии',badge:'',demo:false};
 const request=(method,body,origin='https://test.example')=>new Request('https://test.example/api/products',{method,headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify(body)});
+void test('validates color photos and falls back to the main photo for legacy products',()=>{
+ const bag={...base,colors:['Чёрный','Бежевый'],colorImages:{'Чёрный':' https://example.com/black.jpg ','Бежевый':'/api/images/abcd-1234.png'}};
+ const validated=model.validateProduct(bag);
+ assert.equal(model.productImage(validated,'Чёрный'),'https://example.com/black.jpg');
+ assert.equal(model.productImage(validated,'Бежевый'),'/api/images/abcd-1234.png');
+ assert.equal(model.productImage(base,'Чёрный'),base.image);
+ assert.equal(model.productImage({...base,colors:[]},''),base.image);
+ assert.equal(model.productImage(validated,'Серый'),base.image);
+ assert.equal(model.productImage(model.validateProduct({...bag,colorImages:{'Чёрный':''}}),'Чёрный'),base.image);
+ for(const colorImages of [null,[],{'Серый':'https://example.com/grey.jpg'},{'Чёрный':12},{'Чёрный':'javascript:alert(1)'},{'Чёрный':'http://example.com/black.jpg'},{'Чёрный':'/api/images/../bad.png'},{'Чёрный':'https://example.com/'+'x'.repeat(2000)}])assert.throws(()=>model.validateProduct({...bag,colorImages}));
+});
+void test('persists multiple color photos in one product and removes a color on edit',async()=>{
+ identity=env.ADMIN_EMAIL;
+ const variants={...base,colors:['Чёрный','Бежевый'],colorImages:{'Чёрный':'https://example.com/black.jpg','Бежевый':'https://example.com/beige.jpg'}};
+ const response=await products.POST(request('POST',variants));assert.equal(response.status,201);
+ const created=await response.json();
+ let records=await(await products.GET(new Request('https://test.example/api/products'))).json();
+ assert.equal(records.filter(p=>p.id===created.id).length,1);
+ assert.deepEqual(records.find(p=>p.id===created.id).colorImages,variants.colorImages);
+ const ctx={params:Promise.resolve({id:created.id})};
+ const updated=await item.PUT(request('PUT',{...variants,colors:['Бежевый'],colorImages:{'Бежевый':'https://example.com/new-beige.jpg'}}),ctx);assert.equal(updated.status,200);
+ records=await(await products.GET(new Request('https://test.example/api/products'))).json();
+ const saved=records.find(p=>p.id===created.id);
+ assert.deepEqual(saved.colors,['Бежевый']);assert.deepEqual(saved.colorImages,{'Бежевый':'https://example.com/new-beige.jpg'});
+ assert.equal(model.productImage(saved,'Бежевый'),'https://example.com/new-beige.jpg');
+ const cleared=await item.PUT(request('PUT',{...base,colors:[],colorImages:{}}),ctx);assert.equal(cleared.status,200);
+ records=await(await products.GET(new Request('https://test.example/api/products'))).json();assert.deepEqual(records.find(p=>p.id===created.id).colorImages,{});
+});
 after(async()=>{await mf.dispose()});
 test('validates prices, categories, colors and photo URLs',()=>{assert.equal(model.validateProduct(base).price,0.29);for(const changes of [{price:-1},{price:NaN},{price:1.111},{category:'invalid'},{colors:null},{colors:'Чёрный'},{colors:['invalid']},{image:'javascript:alert(1)'},{image:'http://example.com/a.jpg'},{oldPrice:0.1}])assert.throws(()=>model.validateProduct({...base,...changes}));assert.equal(model.validateProduct({...base,image:'/api/images/abcd-1234.png'}).image,'/api/images/abcd-1234.png')});
 test('rejects anonymous, unrelated accounts and cross-origin writes',async()=>{identity=null;assert.equal((await products.POST(request('POST',base))).status,403);identity='someone@example.com';assert.equal((await products.POST(request('POST',base))).status,403);identity=env.ADMIN_EMAIL;assert.equal((await products.POST(request('POST',base,'https://evil.example'))).status,403);const allowed=env.ADMIN_EMAIL;env.ADMIN_EMAIL='';assert.equal((await products.POST(request('POST',base))).status,403);env.ADMIN_EMAIL=allowed;identity=null;assert.equal((await products.GET(new Request('https://test.example/api/products?all=1'))).status,403)});
