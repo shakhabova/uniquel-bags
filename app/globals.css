@@ -23,3 +23,41 @@
 .color-hint{margin:10px 0 0;color:var(--muted-foreground);font-size:11px;line-height:1.5}
 
 .variant-photos{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}.variant-photos button{display:flex;align-items:center;gap:8px;padding:8px;background:#171e14;border:1px solid #3b4730;border-radius:5px;color:var(--foreground);text-align:left;cursor:pointer}.variant-photos button.selected{border-color:var(--primary)}.variant-photos img{width:40px;height:48px;border-radius:3px;object-fit:cover}.variant-photos span{font-size:11px}.variant-photos small{display:block;font-size:9px;color:#929984;margin-top:4px}
+
+.detail-dialog[data-slot="dialog-content"] {
+  padding: 28px;
+  gap: 20px;
+}
+.detail-dialog .detail-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  margin-top: 0;
+}
+.detail-dialog .detail-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.detail-dialog .detail-grid > div > p,
+.detail-dialog .detail-grid h2,
+.detail-dialog .wide-button,
+.detail-dialog .detail-contact {
+  margin: 0;
+}
+.detail-dialog .swatches {
+  gap: 12px;
+  padding: 4px;
+}
+.detail-dialog .wide-button {
+  margin-top: 4px;
+}
+@media (max-width: 600px) {
+  .detail-dialog[data-slot="dialog-content"] {
+    padding: 20px;
+    gap: 16px;
+  }
+  .detail-dialog .detail-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
