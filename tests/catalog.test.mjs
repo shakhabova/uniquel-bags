@@ -7,9 +7,44 @@ const envModule=new vm.SyntheticModule(['env'],function(){this.setExport('env',e
 const headersModule=new vm.SyntheticModule(['headers'],function(){this.setExport('headers',async()=>new Headers(identity?{'oai-authenticated-user-id':'isolated-test-user','oai-authenticated-user-email':identity}:{}))},{context});
 const navigationModule=new vm.SyntheticModule(['redirect'],function(){this.setExport('redirect',()=>{throw Error('Unexpected redirect')})},{context});
 async function load(filename){filename=path.resolve(filename);if(cache.has(filename))return cache.get(filename);const source=await fs.readFile(filename,'utf8');const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;const mod=new vm.SourceTextModule(code,{context,identifier:filename});cache.set(filename,mod);await mod.link(async(spec,ref)=>{if(spec==='cloudflare:workers')return envModule;if(spec==='next/headers')return headersModule;if(spec==='next/navigation')return navigationModule;const file=spec.startsWith('@/')?path.resolve(spec.slice(2)):path.resolve(path.dirname(ref.identifier),spec);return load(file+'.ts')});return mod;}
-const paths=['lib/products.ts','app/api/products/route.ts','app/api/products/[id]/route.ts','app/api/upload/route.ts','app/api/images/[key]/route.ts'];const mods=[];for(const p of paths){const m=await load(p);await m.evaluate();mods.push(m.namespace)}const [model,products,item,upload,images]=mods;
+const paths=['lib/products.ts','app/api/products/route.ts','app/api/products/[id]/route.ts','app/api/upload/route.ts','app/api/images/[key]/route.ts','lib/product-photos.ts'];const mods=[];for(const p of paths){const m=await load(p);await m.evaluate();mods.push(m.namespace)}const [model,products,item,upload,images,photos]=mods;
 const base={name:'Test bag',category:'Сумки',material:'Экокожа',colors:['Чёрный'],price:0.29,oldPrice:null,description:'Test description',image:'https://example.com/bag.jpg',stock:'В наличии',badge:'',demo:false};
 const request=(method,body,origin='https://test.example')=>new Request('https://test.example/api/products',{method,headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify(body)});
+void test('main photo followed by a second color preserves the first color photo',async()=>{
+ const black='https://example.com/black.jpg',bordo='https://example.com/bordo.jpg';
+ let draft={...base,colors:[],image:'',colorImages:{}};
+ draft=photos.setProductPhoto(draft,black);
+ draft=photos.toggleProductColor(draft,'Чёрный');
+ draft=photos.toggleProductColor(draft,'Бордовый');
+ draft=photos.setProductPhoto(draft,bordo,'Бордовый');
+ assert.equal(draft.image,black);
+ assert.equal(model.productImage(draft,'Чёрный'),black);
+ assert.equal(model.productImage(draft,'Бордовый'),bordo);
+ draft=photos.setProductPhoto(draft,bordo);
+ assert.equal(draft.image,bordo);
+ assert.equal(model.productImage(draft,'Чёрный'),black);
+ identity=env.ADMIN_EMAIL;
+ const response=await products.POST(request('POST',draft));assert.equal(response.status,201);
+ const created=await response.json();
+ const records=await(await products.GET(new Request('https://test.example/api/products'))).json();
+ const saved=records.find(p=>p.id===created.id);
+ assert.equal(model.productImage(saved,'Чёрный'),black);assert.equal(model.productImage(saved,'Бордовый'),bordo);
+});
+void test('color-first uploads select an automatic main photo and preserve legacy color photos',()=>{
+ let draft=photos.toggleProductColor({...base,colors:[],image:'',colorImages:{}},'Чёрный');
+ draft=photos.setProductPhoto(draft,'https://example.com/black.jpg','Чёрный');
+ assert.equal(draft.image,'https://example.com/black.jpg');
+ draft=photos.toggleProductColor(draft,'Бордовый');
+ draft=photos.setProductPhoto(draft,'https://example.com/bordo.jpg','Бордовый');
+ draft=photos.setProductPhoto(draft,'https://example.com/black-new.jpg','Чёрный');
+ assert.equal(draft.image,'https://example.com/black-new.jpg');
+ assert.equal(model.productImage(draft,'Бордовый'),'https://example.com/bordo.jpg');
+ const legacy=photos.setProductPhoto({...base,colors:['Чёрный','Бордовый']},'https://example.com/new-main.jpg');
+ assert.equal(model.productImage(legacy,'Чёрный'),base.image);
+ assert.equal(model.productImage(legacy,'Бордовый'),base.image);
+ draft=photos.toggleProductColor(draft,'Бордовый');assert.equal(draft.colorImages['Бордовый'],undefined);
+ assert.equal(photos.setProductPhoto(draft,'https://example.com/bordo.jpg','Бордовый'),draft);
+});
 void test('validates color photos and falls back to the main photo for legacy products',()=>{
  const bag={...base,colors:['Чёрный','Бежевый'],colorImages:{'Чёрный':' https://example.com/black.jpg ','Бежевый':'/api/images/abcd-1234.png'}};
  const validated=model.validateProduct(bag);
