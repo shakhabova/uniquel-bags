@@ -1,4 +1,4 @@
 import type { Metadata } from 'next';import './globals.css';
 const title='UNIQUEL BAGS — на каждый день и на особые случаи';const description='Каталог UNIQUEL BAGS: сумки, шопперы, кросс-боди и аксессуары. В наличии и под заказ. Грозный, Орзамиева 17.';
 export const metadata:Metadata={metadataBase:new URL('https://uniquel-bags.ardent-snow-8709.chatgpt.site'),title,description,openGraph:{title,description,type:'website',locale:'ru_RU',images:[{url:'/og.png',width:1536,height:1024,alt:'UNIQUEL BAGS — на каждый день и на особые случаи'}]},twitter:{card:'summary_large_image',title,description,images:['/og.png']}};
-export default function Layout({children}:{children:React.ReactNode}){return <html lang="ru" className="dark"><head><link rel="preload" href="/fonts/manrope-variable.ttf" as="font" type="font/ttf" crossOrigin="anonymous"/></head><body>{children}</body></html>}
+export default function Layout({children}:{children:React.ReactNode}){return <html lang="ru" className="dark"><head><link rel="preload" href="/fonts/roboto-variable.ttf" as="font" type="font/ttf" crossOrigin="anonymous"/></head><body>{children}</body></html>}

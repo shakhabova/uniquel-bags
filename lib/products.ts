@@ -3,6 +3,7 @@ export const materials=['Экокожа','Натуральная кожа','Те
 export const colors=[{name:'Чёрный',hex:'#20201d'},{name:'Коричневый',hex:'#8b5636'},{name:'Бежевый',hex:'#d6c5a5'},{name:'Бордовый',hex:'#702a31'},{name:'Зелёный',hex:'#59603a'},{name:'Белый',hex:'#eee8dc'},{name:'Серый',hex:'#8b8e90'},{name:'Голубой',hex:'#8bbde0'}];
 export type Product={id:string;name:string;category:string;material:string;colors:string[];colorImages?:Record<string,string>;price:number;oldPrice:number|null;description:string;size:string;image:string;stock:'В наличии'|'Под заказ';badge:string;demo:boolean;archived:boolean;createdAt:string;};
 export function productImage(product:Pick<Product,'colors'|'colorImages'|'image'>,color=''){return product.colors.includes(color)&&product.colorImages?.[color]||product.image;}
+export function primaryColor(product:Pick<Product,'colors'|'colorImages'|'image'>){return product.colors.find(color=>product.colorImages?.[color]===product.image)??product.colors[0]??'';}
 function validateImage(image:string){
  if(!image||image.length>2000)throw new Error('Укажите ссылку на фото или загрузите файл');
  if(image.startsWith('/api/images/')&&/^[a-f0-9-]+[.](jpg|png|webp)$/.test(image.slice(12)))return;

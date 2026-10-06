@@ -10,6 +10,33 @@ async function load(filename){filename=path.resolve(filename);if(cache.has(filen
 const paths=['lib/products.ts','app/api/products/route.ts','app/api/products/[id]/route.ts','app/api/upload/route.ts','app/api/images/[key]/route.ts','lib/product-photos.ts'];const mods=[];for(const p of paths){const m=await load(p);await m.evaluate();mods.push(m.namespace)}const [model,products,item,upload,images,photos]=mods;
 const base={name:'Test bag',category:'Сумки',material:'Экокожа',colors:['Чёрный'],price:0.29,oldPrice:null,description:'Test description',image:'https://example.com/bag.jpg',stock:'В наличии',badge:'',demo:false};
 const request=(method,body,origin='https://test.example')=>new Request('https://test.example/api/products',{method,headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify(body)});
+void test('product lists put newest additions first and preserve order after edits or archive changes',async()=>{
+ identity=env.ADMIN_EMAIL;
+ const ids=[];
+ for(const name of ['First addition','Second addition','Latest addition']){const response=await products.POST(request('POST',{...base,name}));assert.equal(response.status,201);ids.push((await response.json()).id)}
+ const listed=async(all=false)=>(await(await products.GET(new Request('https://test.example/api/products'+(all?'?all=1':'')))).json()).filter(p=>ids.includes(p.id)).map(p=>p.id);
+ assert.deepEqual(await listed(),[ids[2],ids[1],ids[0]]);assert.deepEqual(await listed(true),[ids[2],ids[1],ids[0]]);
+ const ctx={params:Promise.resolve({id:ids[0]})};assert.equal((await item.PUT(request('PUT',{...base,name:'Edited first addition'}),ctx)).status,200);
+ assert.deepEqual(await listed(),[ids[2],ids[1],ids[0]]);
+ assert.equal((await item.PATCH(request('PATCH',{archived:true}),{params:Promise.resolve({id:ids[2]})})).status,200);
+ assert.deepEqual(await listed(),[ids[1],ids[0]]);assert.deepEqual(await listed(true),[ids[2],ids[1],ids[0]]);
+ assert.equal((await item.PATCH(request('PATCH',{archived:false}),{params:Promise.resolve({id:ids[2]})})).status,200);
+ assert.deepEqual(await listed(),[ids[2],ids[1],ids[0]]);
+});
+void test('two file uploads retain the first cover regardless of selected color order',async()=>{
+ identity=env.ADMIN_EMAIL;
+ const png=Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aR0sAAAAASUVORK5CYII=','base64'));
+ async function uploadPhoto(name){const form=new FormData();form.append('file',new File([png],name,{type:'image/png'}));const result=await upload.POST(new Request('https://test.example/api/upload',{method:'POST',headers:{Origin:'https://test.example'},body:form}));assert.equal(result.status,200);return (await result.json()).image}
+ const first=await uploadPhoto('bordo.png'),second=await uploadPhoto('black.png');assert.notEqual(first,second);
+ let draft={...base,colors:['Чёрный','Бордовый'],colorImages:{},image:''};
+ draft=photos.setProductPhoto(draft,first,'Бордовый');draft=photos.setProductPhoto(draft,second,'Чёрный');
+ assert.equal(draft.image,first);assert.equal(model.primaryColor(draft),'Бордовый');
+ assert.equal(model.productImage(draft,'Чёрный'),second);assert.equal(model.productImage(draft,'Бордовый'),first);
+ const response=await products.POST(request('POST',draft));assert.equal(response.status,201);const created=await response.json();
+ const records=await(await products.GET(new Request('https://test.example/api/products'))).json();const saved=records.find(p=>p.id===created.id);
+ assert.equal(saved.image,first);assert.equal(model.primaryColor(saved),'Бордовый');
+ const replacement=await uploadPhoto('bordo-new.png');const updated=photos.setProductPhoto(saved,replacement,'Бордовый');assert.equal(updated.image,first);assert.equal(model.productImage(updated,'Чёрный'),second);
+});
 void test('main photo followed by a second color preserves the first color photo',async()=>{
  const black='https://example.com/black.jpg',bordo='https://example.com/bordo.jpg';
  let draft={...base,colors:[],image:'',colorImages:{}};
@@ -21,7 +48,7 @@ void test('main photo followed by a second color preserves the first color photo
  assert.equal(model.productImage(draft,'Чёрный'),black);
  assert.equal(model.productImage(draft,'Бордовый'),bordo);
  draft=photos.setProductPhoto(draft,bordo);
- assert.equal(draft.image,bordo);
+ assert.equal(draft.image,black);
  assert.equal(model.productImage(draft,'Чёрный'),black);
  identity=env.ADMIN_EMAIL;
  const response=await products.POST(request('POST',draft));assert.equal(response.status,201);
@@ -37,11 +64,12 @@ void test('color-first uploads select an automatic main photo and preserve legac
  draft=photos.toggleProductColor(draft,'Бордовый');
  draft=photos.setProductPhoto(draft,'https://example.com/bordo.jpg','Бордовый');
  draft=photos.setProductPhoto(draft,'https://example.com/black-new.jpg','Чёрный');
- assert.equal(draft.image,'https://example.com/black-new.jpg');
+ assert.equal(draft.image,'https://example.com/black.jpg');
  assert.equal(model.productImage(draft,'Бордовый'),'https://example.com/bordo.jpg');
  const legacy=photos.setProductPhoto({...base,colors:['Чёрный','Бордовый']},'https://example.com/new-main.jpg');
  assert.equal(model.productImage(legacy,'Чёрный'),base.image);
  assert.equal(model.productImage(legacy,'Бордовый'),base.image);
+ assert.equal(legacy.image,base.image);
  draft=photos.toggleProductColor(draft,'Бордовый');assert.equal(draft.colorImages['Бордовый'],undefined);
  assert.equal(photos.setProductPhoto(draft,'https://example.com/bordo.jpg','Бордовый'),draft);
 });

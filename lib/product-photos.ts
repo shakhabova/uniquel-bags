@@ -3,16 +3,11 @@ import type {Product} from './products';
 type Photos = Pick<Product,'image'|'colors'|'colorImages'>;
 
 export function setProductPhoto<T extends Photos>(product:T,image:string,color=''):T {
+ if(color&&!product.colors.includes(color)||!color&&product.colors.length)return product;
  const colorImages={...product.colorImages};
- if(color&&!product.colors.includes(color))return product;
- const updateMain=!color||!product.image||colorImages[color]===product.image;
- // Preserve photos currently inherited from the main image before replacing it.
- if(updateMain&&product.image){
-  for(const selected of product.colors)if(!colorImages[selected])colorImages[selected]=product.image;
- }
  if(color)colorImages[color]=image;
- else if(!product.image&&product.colors.length&&!colorImages[product.colors[0]])colorImages[product.colors[0]]=image;
- return {...product,colorImages,image:updateMain&&(!color||image)?image:product.image};
+ // Uploading another color, or replacing its photo, never promotes a new cover.
+ return {...product,colorImages,image:color?product.image||image:image};
 }
 
 export function toggleProductColor<T extends Photos>(product:T,color:string):T {
