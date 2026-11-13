@@ -1,9 +1,15 @@
 export const categories=['Сумки','Шопперы','Кросс-боди','Рюкзаки','Клатчи','Аксессуары'];
 export const materials=['Экокожа','Натуральная кожа','Текстиль','Замша'];
 export const colors=[{name:'Чёрный',hex:'#20201d'},{name:'Коричневый',hex:'#8b5636'},{name:'Бежевый',hex:'#d6c5a5'},{name:'Бордовый',hex:'#702a31'},{name:'Зелёный',hex:'#59603a'},{name:'Белый',hex:'#eee8dc'},{name:'Серый',hex:'#8b8e90'},{name:'Голубой',hex:'#8bbde0'}];
-export type Product={id:string;name:string;category:string;material:string;colors:string[];colorImages?:Record<string,string>;price:number;oldPrice:number|null;description:string;size:string;image:string;stock:'В наличии'|'Под заказ';badge:string;demo:boolean;archived:boolean;createdAt:string;};
+export type Product={id:string;name:string;category:string;material:string;colors:string[];colorImages?:Record<string,string>;colorPhotos?:Record<string,string[]>;price:number;oldPrice:number|null;description:string;size:string;image:string;stock:'В наличии'|'Под заказ';badge:string;demo:boolean;archived:boolean;createdAt:string;};
 export function productImage(product:Pick<Product,'colors'|'colorImages'|'image'>,color=''){return product.colors.includes(color)&&product.colorImages?.[color]||product.image;}
-export function primaryColor(product:Pick<Product,'colors'|'colorImages'|'image'>){return product.colors.find(color=>product.colorImages?.[color]===product.image)??product.colors[0]??'';}
+export const MAX_COLOR_PHOTOS=10;
+export function productGallery(product:Pick<Product,'colors'|'colorImages'|'colorPhotos'|'image'>,color=''):string[]{
+ if(color&&product.colors.includes(color)&&product.colorPhotos?.[color]?.length)return product.colorPhotos[color];
+ const image=productImage(product,color);
+ return image?[image]:[];
+}
+export function primaryColor(product:Pick<Product,'colors'|'colorImages'|'colorPhotos'|'image'>){return product.colors.find(color=>product.colorImages?.[color]===product.image||product.colorPhotos?.[color]?.includes(product.image))??product.colors[0]??'';}
 function validateImage(image:string){
  if(!image||image.length>2000)throw new Error('Укажите ссылку на фото или загрузите файл');
  if(image.startsWith('/api/images/')&&/^[a-f0-9-]+[.](jpg|png|webp)$/.test(image.slice(12)))return;
@@ -31,5 +37,15 @@ export function validateProduct(value:unknown):Omit<Product,'id'|'createdAt'|'ar
    const trimmed=photo.trim();if(!trimmed)continue;validateImage(trimmed);colorImages[color]=trimmed;
   }
  }
- return {name:str('name',100,true),category,material,stock:stock as Product['stock'],image,colorImages,colors:[...new Set(v.colors as string[])],price,oldPrice:oldPrice as number|null,description:str('description',5000),size:str('size',100),badge:str('badge',30),demo:v.demo===true};
+ const colorPhotos:Record<string,string[]>={};
+ if(v.colorPhotos!==undefined){
+  if(!v.colorPhotos||typeof v.colorPhotos!=='object'||Array.isArray(v.colorPhotos))throw new Error('Проверьте фотографии цветов');
+  for(const [color,photos] of Object.entries(v.colorPhotos)){
+   if(!(v.colors as string[]).includes(color)||!Array.isArray(photos)||photos.length>MAX_COLOR_PHOTOS)throw new Error('Для каждого цвета можно добавить до 10 фотографий');
+   const clean:string[]=[];
+   for(const photo of photos){if(typeof photo!=='string')throw new Error('Проверьте фотографии цветов');const trimmed=photo.trim();validateImage(trimmed);if(clean.includes(trimmed))throw new Error('Одинаковые фотографии нельзя добавить дважды');clean.push(trimmed)}
+   if(clean.length){colorPhotos[color]=clean;colorImages[color]=clean[0]}
+  }
+ }
+ return {name:str('name',100,true),category,material,stock:stock as Product['stock'],image,colorImages,colorPhotos,colors:[...new Set(v.colors as string[])],price,oldPrice:oldPrice as number|null,description:str('description',5000),size:str('size',100),badge:str('badge',30),demo:v.demo===true};
 }

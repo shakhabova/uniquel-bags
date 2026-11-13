@@ -81,6 +81,19 @@ void test('color-first uploads select an automatic main photo and preserve legac
  draft=photos.toggleProductColor(draft,'Бордовый');assert.equal(draft.colorImages['Бордовый'],undefined);
  assert.equal(photos.setProductPhoto(draft,'https://example.com/bordo.jpg','Бордовый'),draft);
 });
+void test('cropping existing color photos updates the cover only when editing its photo',()=>{
+ const black='https://example.com/black.jpg',bordo='https://example.com/bordo.jpg',crop='/api/images/cafe-1234.jpg';
+ const original={...base,image:black,colors:['Чёрный','Бордовый'],colorImages:{'Чёрный':black,'Бордовый':bordo}};
+ const cover=photos.editProductPhoto(original,crop,'Чёрный');
+ assert.equal(cover.image,crop);assert.equal(cover.colorImages['Чёрный'],crop);assert.equal(cover.colorImages['Бордовый'],bordo);
+ const variant=photos.editProductPhoto(original,crop,'Бордовый');
+ assert.equal(variant.image,black);assert.equal(variant.colorImages['Чёрный'],black);assert.equal(variant.colorImages['Бордовый'],crop);
+ const main=photos.editProductPhoto(original,crop);
+ assert.equal(main.image,crop);assert.equal(main.colorImages['Чёрный'],crop);assert.equal(main.colorImages['Бордовый'],bordo);
+ assert.equal(photos.editProductPhoto(original,crop,'Серый'),original);
+ assert.equal(photos.editProductPhoto({...base,colors:[]},crop).image,crop);
+ assert.equal(original.image,black);assert.equal(original.colorImages['Чёрный'],black);
+});
 void test('validates color photos and falls back to the main photo for legacy products',()=>{
  const bag={...base,colors:['Чёрный','Бежевый'],colorImages:{'Чёрный':' https://example.com/black.jpg ','Бежевый':'/api/images/abcd-1234.png'}};
  const validated=model.validateProduct(bag);
@@ -110,6 +123,17 @@ void test('persists multiple color photos in one product and removes a color on 
  records=await(await products.GET(new Request('https://test.example/api/products'))).json();assert.deepEqual(records.find(p=>p.id===created.id).colorImages,{});
 });
 after(async()=>{db.getDb().close();await fs.rm(dataDir,{recursive:true,force:true})});
+void test('saves and reloads multiple photos per color through the product API',async()=>{
+ sessionCookie=auth.createAdminSession();
+ const colorPhotos={'Чёрный':['https://example.com/front.jpg','https://example.com/back.jpg'],'Бежевый':['https://example.com/beige.jpg']};
+ const body={...base,colors:['Чёрный','Бежевый'],image:colorPhotos['Чёрный'][0],colorPhotos};
+ const createdResponse=await products.POST(request('POST',body));assert.equal(createdResponse.status,201);const created=await createdResponse.json();assert.deepEqual(created.colorPhotos,colorPhotos);
+ const records=await(await products.GET(new Request('https://test.example/api/products'))).json();assert.deepEqual(records.find(p=>p.id===created.id).colorPhotos,colorPhotos);
+ const updatedPhotos={'Чёрный':[colorPhotos['Чёрный'][1]],'Бежевый':colorPhotos['Бежевый']};
+ const response=await item.PUT(request('PUT',{...body,image:colorPhotos['Чёрный'][1],colorPhotos:updatedPhotos}),{params:Promise.resolve({id:created.id})});assert.equal(response.status,200);
+ assert.deepEqual((await response.json()).colorPhotos,updatedPhotos);
+ const saved=await(await products.GET(new Request('https://test.example/api/products'))).json();assert.deepEqual(saved.find(p=>p.id===created.id).colorPhotos,updatedPhotos);
+});
 test('validates prices, categories, colors and photo URLs',()=>{assert.equal(model.validateProduct(base).price,0.29);for(const changes of [{price:-1},{price:NaN},{price:1.111},{category:'invalid'},{colors:null},{colors:'Чёрный'},{colors:['invalid']},{image:'javascript:alert(1)'},{image:'http://example.com/a.jpg'},{oldPrice:0.1}])assert.throws(()=>model.validateProduct({...base,...changes}));assert.equal(model.validateProduct({...base,image:'/api/images/abcd-1234.png'}).image,'/api/images/abcd-1234.png')});
 test('rejects anonymous, unrelated accounts and cross-origin writes',async()=>{sessionCookie='';assert.equal((await products.POST(request('POST',base))).status,403);sessionCookie='invalid-session';assert.equal((await products.POST(request('POST',base))).status,403);sessionCookie=auth.createAdminSession();assert.equal((await products.POST(request('POST',base,'https://evil.example'))).status,403);const allowed=env.ADMIN_EMAIL;env.ADMIN_EMAIL='';assert.equal((await products.POST(request('POST',base))).status,403);env.ADMIN_EMAIL=allowed;sessionCookie='';assert.equal((await products.GET(new Request('https://test.example/api/products?all=1'))).status,403)});
 test('creates, reads, updates, archives and restores durable products',async()=>{sessionCookie=auth.createAdminSession();const response=await products.POST(request('POST',base));assert.equal(response.status,201);const created=await response.json();let records=await(await products.GET(new Request('https://test.example/api/products'))).json();assert.ok(records.some(p=>p.id===created.id));const ctx={params:Promise.resolve({id:created.id})};assert.equal((await item.PUT(request('PUT',{...base,name:'Updated bag',price:4900}),ctx)).status,200);records=await(await products.GET(new Request('https://test.example/api/products'))).json();assert.equal(records.find(p=>p.id===created.id).price,4900);assert.equal((await item.PATCH(request('PATCH',{archived:true}),ctx)).status,200);records=await(await products.GET(new Request('https://test.example/api/products'))).json();assert.ok(!records.some(p=>p.id===created.id));records=await(await products.GET(new Request('https://test.example/api/products?all=1'))).json();assert.equal(records.find(p=>p.id===created.id).archived,true);assert.equal((await item.PATCH(request('PATCH',{archived:false}),ctx)).status,200);records=await(await products.GET(new Request('https://test.example/api/products'))).json();assert.ok(records.some(p=>p.id===created.id));assert.equal((await item.PUT(request('PUT',{...base,price:-2}),ctx)).status,400);assert.equal((await item.PATCH(request('PATCH',{archived:'true'}),ctx)).status,400);assert.equal((await item.PUT(request('PUT',base),{params:Promise.resolve({id:'missing'})})).status,404)});
