@@ -1,17 +1,25 @@
-import {test,after} from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';import fs from 'node:fs/promises';import path from 'node:path';import ts from 'typescript';import {Miniflare} from 'miniflare';
-// Isolated test bindings and mock identity; never changes app access or production data.
-const mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("test")}}',compatibilityDate:'2026-05-15',d1Databases:['DB'],r2Buckets:['IMAGES']});
-const env={DB:await mf.getD1Database('DB'),IMAGES:await mf.getR2Bucket('IMAGES'),ADMIN_EMAIL:'alina.shakhabova@yandex.ru'};
-let identity=null;const context=vm.createContext({console,Response,Request,URL,File,FormData,Uint8Array,TextDecoder,crypto});const cache=new Map();
-const envModule=new vm.SyntheticModule(['env'],function(){this.setExport('env',env)},{context});
-const headersModule=new vm.SyntheticModule(['headers'],function(){this.setExport('headers',async()=>new Headers(identity?{'oai-authenticated-user-id':'isolated-test-user','oai-authenticated-user-email':identity}:{}))},{context});
-const navigationModule=new vm.SyntheticModule(['redirect'],function(){this.setExport('redirect',()=>{throw Error('Unexpected redirect')})},{context});
-async function load(filename){filename=path.resolve(filename);if(cache.has(filename))return cache.get(filename);const source=await fs.readFile(filename,'utf8');const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;const mod=new vm.SourceTextModule(code,{context,identifier:filename});cache.set(filename,mod);await mod.link(async(spec,ref)=>{if(spec==='cloudflare:workers')return envModule;if(spec==='next/headers')return headersModule;if(spec==='next/navigation')return navigationModule;const file=spec.startsWith('@/')?path.resolve(spec.slice(2)):path.resolve(path.dirname(ref.identifier),spec);return load(file+'.ts')});return mod;}
-const paths=['lib/products.ts','app/api/products/route.ts','app/api/products/[id]/route.ts','app/api/upload/route.ts','app/api/images/[key]/route.ts','lib/product-photos.ts'];const mods=[];for(const p of paths){const m=await load(p);await m.evaluate();mods.push(m.namespace)}const [model,products,item,upload,images,photos]=mods;
+import {test,after} from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import ts from 'typescript';
+// Isolated filesystem, SQLite database and signed cookie; never touches production data.
+const dataDir=await fs.mkdtemp(path.join(os.tmpdir(),'uniquel-bags-test-'));
+const env=process.env;env.DATA_DIR=dataDir;env.ADMIN_EMAIL='admin@example.com';env.ADMIN_PASSWORD='test-password';env.SESSION_SECRET='test-session-secret-with-at-least-32-characters';env.NODE_ENV='test';
+let sessionCookie='';const context=vm.createContext({console,Response,Request,Headers,URL,File,FormData,Uint8Array,TextDecoder,TextEncoder,Buffer,crypto,process});const cache=new Map();
+const headersModule=new vm.SyntheticModule(['cookies'],function(){this.setExport('cookies',async()=>({get(name){return name==='uniquel_admin'&&sessionCookie?{name,value:sessionCookie}:undefined}}))},{context});
+async function builtin(spec){const imported=await import(spec);const names=Object.keys(imported);return new vm.SyntheticModule(names,function(){for(const name of names)this.setExport(name,imported[name])},{context,identifier:spec})}
+async function load(filename){filename=path.resolve(filename);if(cache.has(filename))return cache.get(filename);const source=await fs.readFile(filename,'utf8');const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;const mod=new vm.SourceTextModule(code,{context,identifier:filename});cache.set(filename,mod);await mod.link(async(spec,ref)=>{if(spec.startsWith('node:'))return builtin(spec);if(spec==='next/headers')return headersModule;const base=spec.startsWith('@/')?path.resolve(spec.slice(2)):path.resolve(path.dirname(ref.identifier),spec);for(const candidate of [base+'.ts',base+'.tsx',path.join(base,'index.ts')]){try{await fs.access(candidate);return load(candidate)}catch{}}throw new Error(`Cannot resolve ${spec} from ${ref.identifier}`)});return mod;}
+const paths=['db/index.ts','lib/products.ts','lib/auth.ts','app/api/auth/login/route.ts','app/api/auth/logout/route.ts','app/api/products/route.ts','app/api/products/[id]/route.ts','app/api/upload/route.ts','app/api/images/[key]/route.ts','lib/product-photos.ts'];const mods=[];for(const p of paths){const m=await load(p);await m.evaluate();mods.push(m.namespace)}const [db,model,auth,login,logout,products,item,upload,images,photos]=mods;
 const base={name:'Test bag',category:'Сумки',material:'Экокожа',colors:['Чёрный'],price:0.29,oldPrice:null,description:'Test description',image:'https://example.com/bag.jpg',stock:'В наличии',badge:'',demo:false};
 const request=(method,body,origin='https://test.example')=>new Request('https://test.example/api/products',{method,headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify(body)});
+void test('logs in with configured credentials, creates a signed session and logs out',async()=>{
+ sessionCookie='';
+ const denied=await login.POST(request('POST',{email:env.ADMIN_EMAIL,password:'wrong-password'}));assert.equal(denied.status,401);
+ const response=await login.POST(request('POST',{email:env.ADMIN_EMAIL,password:env.ADMIN_PASSWORD}));assert.equal(response.status,200);
+ const cookie=response.headers.get('set-cookie');assert.ok(cookie?.includes('HttpOnly'));assert.ok(cookie?.includes('SameSite=Strict'));
+ sessionCookie=cookie.split(';')[0].slice('uniquel_admin='.length);assert.equal((await products.POST(request('POST',base))).status,201);
+ const signedOut=await logout.POST(request('POST',{}));assert.equal(signedOut.status,200);assert.ok(signedOut.headers.get('set-cookie')?.includes('Max-Age=0'));
+ sessionCookie='';
+});
 void test('product lists put newest additions first and preserve order after edits or archive changes',async()=>{
- identity=env.ADMIN_EMAIL;
+ sessionCookie=auth.createAdminSession();
  const ids=[];
  for(const name of ['First addition','Second addition','Latest addition']){const response=await products.POST(request('POST',{...base,name}));assert.equal(response.status,201);ids.push((await response.json()).id)}
  const listed=async(all=false)=>(await(await products.GET(new Request('https://test.example/api/products'+(all?'?all=1':'')))).json()).filter(p=>ids.includes(p.id)).map(p=>p.id);
@@ -24,7 +32,7 @@ void test('product lists put newest additions first and preserve order after edi
  assert.deepEqual(await listed(),[ids[2],ids[1],ids[0]]);
 });
 void test('two file uploads retain the first cover regardless of selected color order',async()=>{
- identity=env.ADMIN_EMAIL;
+ sessionCookie=auth.createAdminSession();
  const png=Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aR0sAAAAASUVORK5CYII=','base64'));
  async function uploadPhoto(name){const form=new FormData();form.append('file',new File([png],name,{type:'image/png'}));const result=await upload.POST(new Request('https://test.example/api/upload',{method:'POST',headers:{Origin:'https://test.example'},body:form}));assert.equal(result.status,200);return (await result.json()).image}
  const first=await uploadPhoto('bordo.png'),second=await uploadPhoto('black.png');assert.notEqual(first,second);
@@ -50,7 +58,7 @@ void test('main photo followed by a second color preserves the first color photo
  draft=photos.setProductPhoto(draft,bordo);
  assert.equal(draft.image,black);
  assert.equal(model.productImage(draft,'Чёрный'),black);
- identity=env.ADMIN_EMAIL;
+ sessionCookie=auth.createAdminSession();
  const response=await products.POST(request('POST',draft));assert.equal(response.status,201);
  const created=await response.json();
  const records=await(await products.GET(new Request('https://test.example/api/products'))).json();
@@ -85,7 +93,7 @@ void test('validates color photos and falls back to the main photo for legacy pr
  for(const colorImages of [null,[],{'Серый':'https://example.com/grey.jpg'},{'Чёрный':12},{'Чёрный':'javascript:alert(1)'},{'Чёрный':'http://example.com/black.jpg'},{'Чёрный':'/api/images/../bad.png'},{'Чёрный':'https://example.com/'+'x'.repeat(2000)}])assert.throws(()=>model.validateProduct({...bag,colorImages}));
 });
 void test('persists multiple color photos in one product and removes a color on edit',async()=>{
- identity=env.ADMIN_EMAIL;
+ sessionCookie=auth.createAdminSession();
  const variants={...base,colors:['Чёрный','Бежевый'],colorImages:{'Чёрный':'https://example.com/black.jpg','Бежевый':'https://example.com/beige.jpg'}};
  const response=await products.POST(request('POST',variants));assert.equal(response.status,201);
  const created=await response.json();
@@ -101,14 +109,14 @@ void test('persists multiple color photos in one product and removes a color on 
  const cleared=await item.PUT(request('PUT',{...base,colors:[],colorImages:{}}),ctx);assert.equal(cleared.status,200);
  records=await(await products.GET(new Request('https://test.example/api/products'))).json();assert.deepEqual(records.find(p=>p.id===created.id).colorImages,{});
 });
-after(async()=>{await mf.dispose()});
+after(async()=>{db.getDb().close();await fs.rm(dataDir,{recursive:true,force:true})});
 test('validates prices, categories, colors and photo URLs',()=>{assert.equal(model.validateProduct(base).price,0.29);for(const changes of [{price:-1},{price:NaN},{price:1.111},{category:'invalid'},{colors:null},{colors:'Чёрный'},{colors:['invalid']},{image:'javascript:alert(1)'},{image:'http://example.com/a.jpg'},{oldPrice:0.1}])assert.throws(()=>model.validateProduct({...base,...changes}));assert.equal(model.validateProduct({...base,image:'/api/images/abcd-1234.png'}).image,'/api/images/abcd-1234.png')});
-test('rejects anonymous, unrelated accounts and cross-origin writes',async()=>{identity=null;assert.equal((await products.POST(request('POST',base))).status,403);identity='someone@example.com';assert.equal((await products.POST(request('POST',base))).status,403);identity=env.ADMIN_EMAIL;assert.equal((await products.POST(request('POST',base,'https://evil.example'))).status,403);const allowed=env.ADMIN_EMAIL;env.ADMIN_EMAIL='';assert.equal((await products.POST(request('POST',base))).status,403);env.ADMIN_EMAIL=allowed;identity=null;assert.equal((await products.GET(new Request('https://test.example/api/products?all=1'))).status,403)});
-test('creates, reads, updates, archives and restores durable products',async()=>{identity=env.ADMIN_EMAIL;const response=await products.POST(request('POST',base));assert.equal(response.status,201);const created=await response.json();let records=await(await products.GET(new Request('https://test.example/api/products'))).json();assert.ok(records.some(p=>p.id===created.id));const ctx={params:Promise.resolve({id:created.id})};assert.equal((await item.PUT(request('PUT',{...base,name:'Updated bag',price:4900}),ctx)).status,200);records=await(await products.GET(new Request('https://test.example/api/products'))).json();assert.equal(records.find(p=>p.id===created.id).price,4900);assert.equal((await item.PATCH(request('PATCH',{archived:true}),ctx)).status,200);records=await(await products.GET(new Request('https://test.example/api/products'))).json();assert.ok(!records.some(p=>p.id===created.id));records=await(await products.GET(new Request('https://test.example/api/products?all=1'))).json();assert.equal(records.find(p=>p.id===created.id).archived,true);assert.equal((await item.PATCH(request('PATCH',{archived:false}),ctx)).status,200);records=await(await products.GET(new Request('https://test.example/api/products'))).json();assert.ok(records.some(p=>p.id===created.id));assert.equal((await item.PUT(request('PUT',{...base,price:-2}),ctx)).status,400);assert.equal((await item.PATCH(request('PATCH',{archived:'true'}),ctx)).status,400);assert.equal((await item.PUT(request('PUT',base),{params:Promise.resolve({id:'missing'})})).status,404)});
-test('validates uploads and retrieves stored image bytes',async()=>{identity=env.ADMIN_EMAIL;const png=Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aR0sAAAAASUVORK5CYII=','base64'));const form=new FormData();form.append('file',new File([png],'photo.png',{type:'image/png'}));const res=await upload.POST(new Request('https://test.example/api/upload',{method:'POST',headers:{Origin:'https://test.example'},body:form}));assert.equal(res.status,200);const result=await res.json();const key=result.image.split('/').at(-1);const photo=await images.GET(new Request('https://test.example'+result.image),{params:Promise.resolve({key})});assert.equal(photo.status,200);assert.equal(photo.headers.get('content-type'),'image/png');assert.deepEqual(new Uint8Array(await photo.arrayBuffer()),png);const bad=new FormData();bad.append('file',new File(['<svg/>'],'x.png',{type:'image/png'}));assert.equal((await upload.POST(new Request('https://test.example/api/upload',{method:'POST',headers:{Origin:'https://test.example'},body:bad}))).status,400);assert.equal((await images.GET(new Request('https://test.example/api/images/x'),{params:Promise.resolve({key:'../bad'})})).status,404);identity=null;assert.equal((await upload.POST(new Request('https://test.example/api/upload',{method:'POST',headers:{Origin:'https://test.example'},body:form}))).status,403)});
+test('rejects anonymous, unrelated accounts and cross-origin writes',async()=>{sessionCookie='';assert.equal((await products.POST(request('POST',base))).status,403);sessionCookie='invalid-session';assert.equal((await products.POST(request('POST',base))).status,403);sessionCookie=auth.createAdminSession();assert.equal((await products.POST(request('POST',base,'https://evil.example'))).status,403);const allowed=env.ADMIN_EMAIL;env.ADMIN_EMAIL='';assert.equal((await products.POST(request('POST',base))).status,403);env.ADMIN_EMAIL=allowed;sessionCookie='';assert.equal((await products.GET(new Request('https://test.example/api/products?all=1'))).status,403)});
+test('creates, reads, updates, archives and restores durable products',async()=>{sessionCookie=auth.createAdminSession();const response=await products.POST(request('POST',base));assert.equal(response.status,201);const created=await response.json();let records=await(await products.GET(new Request('https://test.example/api/products'))).json();assert.ok(records.some(p=>p.id===created.id));const ctx={params:Promise.resolve({id:created.id})};assert.equal((await item.PUT(request('PUT',{...base,name:'Updated bag',price:4900}),ctx)).status,200);records=await(await products.GET(new Request('https://test.example/api/products'))).json();assert.equal(records.find(p=>p.id===created.id).price,4900);assert.equal((await item.PATCH(request('PATCH',{archived:true}),ctx)).status,200);records=await(await products.GET(new Request('https://test.example/api/products'))).json();assert.ok(!records.some(p=>p.id===created.id));records=await(await products.GET(new Request('https://test.example/api/products?all=1'))).json();assert.equal(records.find(p=>p.id===created.id).archived,true);assert.equal((await item.PATCH(request('PATCH',{archived:false}),ctx)).status,200);records=await(await products.GET(new Request('https://test.example/api/products'))).json();assert.ok(records.some(p=>p.id===created.id));assert.equal((await item.PUT(request('PUT',{...base,price:-2}),ctx)).status,400);assert.equal((await item.PATCH(request('PATCH',{archived:'true'}),ctx)).status,400);assert.equal((await item.PUT(request('PUT',base),{params:Promise.resolve({id:'missing'})})).status,404)});
+test('validates uploads and retrieves stored image bytes',async()=>{sessionCookie=auth.createAdminSession();const png=Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aR0sAAAAASUVORK5CYII=','base64'));const form=new FormData();form.append('file',new File([png],'photo.png',{type:'image/png'}));const res=await upload.POST(new Request('https://test.example/api/upload',{method:'POST',headers:{Origin:'https://test.example'},body:form}));assert.equal(res.status,200);const result=await res.json();const key=result.image.split('/').at(-1);const photo=await images.GET(new Request('https://test.example'+result.image),{params:Promise.resolve({key})});assert.equal(photo.status,200);assert.equal(photo.headers.get('content-type'),'image/png');assert.deepEqual(new Uint8Array(await photo.arrayBuffer()),png);const bad=new FormData();bad.append('file',new File(['<svg/>'],'x.png',{type:'image/png'}));assert.equal((await upload.POST(new Request('https://test.example/api/upload',{method:'POST',headers:{Origin:'https://test.example'},body:bad}))).status,400);assert.equal((await images.GET(new Request('https://test.example/api/images/x'),{params:Promise.resolve({key:'../bad'})})).status,404);sessionCookie='';assert.equal((await upload.POST(new Request('https://test.example/api/upload',{method:'POST',headers:{Origin:'https://test.example'},body:form}))).status,403)});
 
 test('saves and updates products with new colors or no color',async()=>{
- identity=env.ADMIN_EMAIL;
+ sessionCookie=auth.createAdminSession();
  for(const selectedColors of [[],['Серый'],['Голубой'],['Серый','Голубой']]){
   const response=await products.POST(request('POST',{...base,colors:selectedColors}));
   assert.equal(response.status,201);
@@ -136,7 +144,7 @@ test('allows optional description and size while enforcing length limits',()=>{
  assert.throws(()=>model.validateProduct({...base,description:'x'.repeat(5001)}));
 });
 test('persists bag size with an empty description and can clear the size',async()=>{
- identity=env.ADMIN_EMAIL;
+ sessionCookie=auth.createAdminSession();
  const response=await products.POST(request('POST',{...base,description:'',size:'30 × 20 × 12 см'}));
  assert.equal(response.status,201);
  const created=await response.json();

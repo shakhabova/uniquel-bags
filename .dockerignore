@@ -1,0 +1,15 @@
+.git
+.gitignore
+.openai
+.wrangler
+.vinext
+.next
+node_modules
+dist
+data
+coverage
+.env*
+!.env.example
+*.log
+README.md
+tests
