@@ -1,13 +1,13 @@
-import { Logo } from '@/components/logo';
-import type { Product } from '@/lib/products';
-import AdminLoginForm from '@/components/admin-login-form';
-import { getAdminUser } from '@/lib/auth';
-import AdminPanel from '@/components/admin-panel';
-import { listProducts } from '@/lib/store';
+import { Logo } from "@/components/logo";
+import type { Product } from "@/lib/products";
+import AdminLoginForm from "@/components/admin-login-form";
+import { getAdminUser } from "@/lib/auth";
+import AdminPanel from "@/components/admin-panel";
+import { listProducts } from "@/lib/store";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 export const metadata = {
-  title: 'Управление каталогом — UNIQUEL BAGS',
+  title: "Управление каталогом — UNIQUEL BAGS",
   robots: { index: false, follow: false },
 };
 
@@ -31,11 +31,11 @@ export default async function Admin() {
   }
 
   let products: Product[] = [];
-  let error = '';
+  let error = "";
   try {
     products = await listProducts(true);
   } catch {
-    error = 'Не удалось загрузить товары. Попробуйте ещё раз.';
+    error = "Не удалось загрузить товары. Попробуйте ещё раз.";
   }
   return (
     <AdminPanel

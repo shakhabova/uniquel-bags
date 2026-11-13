@@ -1,33 +1,33 @@
-'use client';
+"use client";
 
-import { useState, type SubmitEvent } from 'react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { useState, type SubmitEvent } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export default function AdminLoginForm() {
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   async function login(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
-    setError('');
+    setError("");
 
     const form = new FormData(event.currentTarget);
     try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email: form.get('email'),
-          password: form.get('password'),
+          email: form.get("email"),
+          password: form.get("password"),
         }),
       });
       const data = (await response.json()) as { error?: string };
-      if (!response.ok) throw new Error(data.error || 'Не удалось войти');
-      window.location.assign('/admin');
+      if (!response.ok) throw new Error(data.error || "Не удалось войти");
+      window.location.assign("/admin");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Не удалось войти');
+      setError(reason instanceof Error ? reason.message : "Не удалось войти");
       setBusy(false);
     }
   }
@@ -56,7 +56,7 @@ export default function AdminLoginForm() {
         </p>
       )}
       <Button className="gold-button" type="submit" disabled={busy}>
-        {busy ? 'Вход…' : 'Войти в панель'}
+        {busy ? "Вход…" : "Войти в панель"}
       </Button>
     </form>
   );

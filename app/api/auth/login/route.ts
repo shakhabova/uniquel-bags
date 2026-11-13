@@ -2,13 +2,13 @@ import {
   adminSessionCookie,
   createAdminSession,
   verifyAdminCredentials,
-} from '@/lib/auth';
-import { sameOrigin } from '@/lib/admin';
+} from "@/lib/auth";
+import { sameOrigin } from "@/lib/admin";
 
 export async function POST(request: Request) {
   if (!sameOrigin(request)) {
     return Response.json(
-      { error: 'Недопустимый источник запроса' },
+      { error: "Недопустимый источник запроса" },
       { status: 403 },
     );
   }
@@ -19,12 +19,12 @@ export async function POST(request: Request) {
       password?: unknown;
     };
     if (
-      typeof body.email !== 'string' ||
-      typeof body.password !== 'string' ||
+      typeof body.email !== "string" ||
+      typeof body.password !== "string" ||
       !verifyAdminCredentials(body.email, body.password)
     ) {
       return Response.json(
-        { error: 'Неверный email или пароль' },
+        { error: "Неверный email или пароль" },
         { status: 401 },
       );
     }
@@ -33,14 +33,14 @@ export async function POST(request: Request) {
       { ok: true },
       {
         headers: {
-          'Set-Cookie': adminSessionCookie(createAdminSession()),
-          'Cache-Control': 'no-store',
+          "Set-Cookie": adminSessionCookie(createAdminSession()),
+          "Cache-Control": "no-store",
         },
       },
     );
   } catch {
     return Response.json(
-      { error: 'Не удалось войти. Проверьте настройки сервера.' },
+      { error: "Не удалось войти. Проверьте настройки сервера." },
       { status: 400 },
     );
   }

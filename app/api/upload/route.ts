@@ -1,44 +1,44 @@
-import { authorize } from '@/lib/admin';
-import { saveImage } from '@/lib/storage';
+import { authorize } from "@/lib/admin";
+import { saveImage } from "@/lib/storage";
 
 export async function POST(request: Request) {
   const denied = await authorize(request);
   if (denied) return denied;
 
   try {
-    if (Number(request.headers.get('content-length') || 0) > 9 * 1024 * 1024) {
+    if (Number(request.headers.get("content-length") || 0) > 9 * 1024 * 1024) {
       return Response.json(
-        { error: 'Фото должно быть меньше 8 МБ' },
+        { error: "Фото должно быть меньше 8 МБ" },
         { status: 413 },
       );
     }
     const form = await request.formData();
-    const file = form.get('file');
+    const file = form.get("file");
     if (
       !(file instanceof File) ||
       file.size === 0 ||
       file.size > 8 * 1024 * 1024
     ) {
       return Response.json(
-        { error: 'Выберите фото размером до 8 МБ' },
+        { error: "Выберите фото размером до 8 МБ" },
         { status: 400 },
       );
     }
 
     const bytes = new Uint8Array(await file.arrayBuffer());
-    let ext = '';
+    let ext = "";
     if (bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) {
-      ext = 'jpg';
-    } else if (bytes.slice(0, 8).join(',') === '137,80,78,71,13,10,26,10') {
-      ext = 'png';
+      ext = "jpg";
+    } else if (bytes.slice(0, 8).join(",") === "137,80,78,71,13,10,26,10") {
+      ext = "png";
     } else if (
-      new TextDecoder().decode(bytes.slice(0, 4)) === 'RIFF' &&
-      new TextDecoder().decode(bytes.slice(8, 12)) === 'WEBP'
+      new TextDecoder().decode(bytes.slice(0, 4)) === "RIFF" &&
+      new TextDecoder().decode(bytes.slice(8, 12)) === "WEBP"
     ) {
-      ext = 'webp';
+      ext = "webp";
     } else {
       return Response.json(
-        { error: 'Поддерживаются только JPG, PNG и WebP' },
+        { error: "Поддерживаются только JPG, PNG и WebP" },
         { status: 400 },
       );
     }
@@ -48,7 +48,7 @@ export async function POST(request: Request) {
     return Response.json({ image: `/api/images/${key}` });
   } catch {
     return Response.json(
-      { error: 'Не удалось загрузить фото. Попробуйте ещё раз.' },
+      { error: "Не удалось загрузить фото. Попробуйте ещё раз." },
       { status: 503 },
     );
   }

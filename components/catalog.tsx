@@ -1,62 +1,926 @@
-'use client';
-import {useEffect,useMemo,useState} from 'react';
-import {ArrowUpRight,Heart,Search,ShoppingBag,SlidersHorizontal,ArrowRight,Leaf,Truck,MapPin,ShieldCheck,Minus,Plus,Trash2,Grid2X2,Camera,Send} from 'lucide-react';
-import {Button} from '@/components/ui/button';import {Input} from '@/components/ui/input';import {Dialog,DialogContent,DialogTitle,DialogDescription} from '@/components/ui/dialog';
-import {categories,materials,colors,money,productImage,productGallery,primaryColor,type Product} from '@/lib/products';
-import {Logo} from '@/components/logo';
-import {CatalogCardImage} from '@/components/catalog-card-image';
-function BrandNotice(){return <aside className="brand-notice" aria-label="О товарах магазина"><ShieldCheck size={20} aria-hidden="true"/><div><strong>Копий брендов нет</strong><p>Заказы на реплики не принимаем.</p></div></aside>}
-export default function Catalog({initialProducts,initialError=''}:{initialProducts:Product[];initialError?:string}){
- const [cardColors,setCardColors]=useState<Record<string,string>>({});
- const [photoIndex,setPhotoIndex]=useState(0);
- const [checkoutBusy,setCheckoutBusy]=useState(false),[checkoutError,setCheckoutError]=useState('');
- const [savedOrder,setSavedOrder]=useState<{url:string;whatsappUrl:string}|null>(null);
- const [products,setProducts]=useState(initialProducts),[error,setError]=useState(initialError),[cats,setCats]=useState<string[]>([]),[mats,setMats]=useState<string[]>([]),[color,setColor]=useState(''),[min,setMin]=useState(''),[max,setMax]=useState(''),[query,setQuery]=useState(''),[sort,setSort]=useState('new'),[onlyStock,setOnlyStock]=useState(false),[favoriteMode,setFavoriteMode]=useState(false),[favorites,setFavorites]=useState<string[]>([]),[limit,setLimit]=useState(9),[filtersOpen,setFiltersOpen]=useState(false),[searchOpen,setSearchOpen]=useState(false),[details,setDetails]=useState<Product|null>(null),[chosenColor,setChosenColor]=useState(''),[cart,setCart]=useState<Record<string,number>>({}),[cartOpen,setCartOpen]=useState(false),[notice,setNotice]=useState(''),[collection,setCollection]=useState(false);
- useEffect(()=>{try{const f=JSON.parse(localStorage.getItem('uniquel-favorites')||'[]');if(Array.isArray(f))setFavorites(f.filter(x=>typeof x==='string'));}catch{}},[]);
- useEffect(()=>{if(!notice)return;const timer=setTimeout(()=>setNotice(''),3000);return()=>clearTimeout(timer)},[notice]);
- const toggle=(x:string,list:string[],set:(v:string[])=>void)=>{set(list.includes(x)?list.filter(y=>y!==x):[...list,x]);setLimit(9)};
- const fav=(id:string)=>{const next=favorites.includes(id)?favorites.filter(x=>x!==id):[...favorites,id];setFavorites(next);try{localStorage.setItem('uniquel-favorites',JSON.stringify(next))}catch{}};
- const reset=()=>{setCats([]);setMats([]);setColor('');setMin('');setMax('');setOnlyStock(false);setQuery('');setFavoriteMode(false);setCollection(false);setLimit(9)};
- const filtered=useMemo(()=>products.filter(p=>(!cats.length||cats.includes(p.category))&&(!mats.length||mats.includes(p.material))&&(!color||p.colors.includes(color))&&(!min||p.price>=Number(min))&&(!max||p.price<=Number(max))&&(!onlyStock||p.stock==='В наличии')&&(!favoriteMode||favorites.includes(p.id))&&(!collection||p.badge==='Новинка')&&(!query||[p.name,p.category,p.description].join(' ').toLowerCase().includes(query.toLowerCase()))).sort((a,b)=>sort==='price-up'?a.price-b.price:sort==='price-down'?b.price-a.price:sort==='new'?b.createdAt.localeCompare(a.createdAt):Number(b.badge==='Хит')-Number(a.badge==='Хит')),[products,cats,mats,color,min,max,onlyStock,favoriteMode,favorites,collection,query,sort]);
- const activeCount=cats.length+mats.length+Number(!!color)+Number(!!min||!!max)+Number(onlyStock);
- const cardColor=(p:Product)=>[cardColors[p.id],color,primaryColor(p)].find(c=>c&&p.colors.includes(c))??'';
- const open=(p:Product)=>{setDetails(p);setChosenColor(cardColor(p));setPhotoIndex(0)};
- const gallery=details?productGallery(details,chosenColor):[];
- const cartRows=Object.entries(cart).map(([key,qty])=>{const [id,c]=key.split('|');return {key,qty,color:c,product:products.find(p=>p.id===id)}}).filter(r=>r.product);
- const cartTotal=cartRows.reduce((s,r)=>s+r.product!.price*r.qty,0),cartCount=cartRows.reduce((s,r)=>s+r.qty,0);
- const cartChange=(key:string,delta:number)=>setCart(prev=>{const next={...prev};next[key]=Math.max(0,Math.min(99,(next[key]||0)+delta));if(!next[key])delete next[key];return next});
- const add=(p:Product,c:string)=>{cartChange(p.id+'|'+c,1);setNotice('Товар добавлен в корзину')};
- async function checkout(){
-  if(checkoutBusy)return;
-  setCheckoutBusy(true);setCheckoutError('');setSavedOrder(null);
-  try{
-   const response=await fetch('/api/orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:cartRows.map(row=>({productId:row.product!.id,color:row.color,quantity:row.qty}))})});
-   const data=await response.json() as {url?:string;whatsappUrl?:string;error?:string};
-   if(!response.ok||!data.url||!data.whatsappUrl)throw new Error(data.error||'Не удалось сохранить заказ');
-   setSavedOrder({url:data.url,whatsappUrl:data.whatsappUrl});
-   window.location.assign(data.whatsappUrl);
-  }catch(error){setCheckoutError(error instanceof Error?error.message:'Не удалось сохранить заказ. Попробуйте ещё раз')}
-  finally{setCheckoutBusy(false)}
- }
- const whatsapp=(text:string)=>'https://wa.me/79332152529?text='+encodeURIComponent(text);
- const filters=<><div className="filter-heading"><span>Фильтры</span><button onClick={reset}>Сбросить</button></div><div className="filter-group"><h3>Категория</h3>{categories.map(x=><label className="check-row" key={x}><input type="checkbox" checked={cats.includes(x)} onChange={()=>toggle(x,cats,setCats)}/><span>{x}</span><small>{products.filter(p=>p.category===x).length}</small></label>)}</div><div className="filter-group"><h3>Цвет <small>{color}</small></h3><div className="swatches">{colors.map(c=><button key={c.name} title={c.name} aria-label={c.name} aria-pressed={color===c.name} className={color===c.name?'selected':''} style={{background:c.hex}} onClick={()=>setColor(color===c.name?'':c.name)}/>)}</div></div><div className="filter-group"><h3>Материал</h3>{materials.map(x=><label className="check-row" key={x}><input type="checkbox" checked={mats.includes(x)} onChange={()=>toggle(x,mats,setMats)}/>{x}</label>)}</div><div className="filter-group"><h3>Цена, ₽</h3><div className="price-fields"><Input aria-label="Минимальная цена" placeholder="От" type="number" min="0" value={min} onChange={e=>setMin(e.target.value)}/><span>—</span><Input aria-label="Максимальная цена" placeholder="До" type="number" min="0" value={max} onChange={e=>setMax(e.target.value)}/></div>{min&&max&&Number(min)>Number(max)&&<p className="field-error">Цена «от» должна быть меньше цены «до»</p>}</div><label className="check-row"><input type="checkbox" checked={onlyStock} onChange={e=>setOnlyStock(e.target.checked)}/>Только в наличии</label><div className="custom-order"><p className="eyebrow">ПОМОЖЕМ ВЫБРАТЬ</p><h3>Ваша идеальная сумка</h3><p>Расскажите, какую модель ищете. Поможем подобрать цвет и форму.</p><a href={whatsapp('Здравствуйте! Помогите подобрать сумку.')} target="_blank" rel="noreferrer">Написать нам <ArrowUpRight size={16}/></a></div></>;
- return <main className="shell"><header><Logo/><div className="header-actions"><button aria-label="Поиск" onClick={()=>setSearchOpen(!searchOpen)}><Search size={21}/></button><button className={favoriteMode?'highlight':''} aria-label="Избранное" onClick={()=>{setFavoriteMode(!favoriteMode);document.getElementById('catalog')?.scrollIntoView()}}><Heart size={21}/>{favorites.length>0&&<small>{favorites.length}</small>}</button><button aria-label="Корзина" onClick={()=>setCartOpen(true)}><ShoppingBag size={21}/>{cartCount>0&&<small>{cartCount}</small>}</button></div></header>
- {searchOpen&&<div className="search-bar"><Search size={18}/><Input autoFocus placeholder="Найти свою сумку…" aria-label="Поиск товаров" value={query} onChange={e=>setQuery(e.target.value)}/></div>}
- <section className="hero"><div className="hero-copy"><p className="eyebrow">UNIQUEL BAGS · С ЛЮБОВЬЮ К ДЕТАЛЯМ</p><h1>На каждый день.<br/>На особые случаи</h1><p>Любимая сумка — больше, чем аксессуар.<br/>Найдите ту, что расскажет вашу историю.</p><a className="gold-button" href="#catalog">Смотреть коллекцию <ArrowRight size={18} aria-hidden="true"/></a><div className="hero-caption">Эко-материалы высокого качества</div></div><picture><source media="(max-width: 600px)" srcSet="/hero_bg.png"/><img src="/hero.png" alt="Сумки UNIQUEL BAGS"/></picture><span className="hero-note"></span></section>
- <div className="section-title" id="catalog"><div><p className="eyebrow">ВАША НОВАЯ ЛЮБИМАЯ</p><h2>{favoriteMode?'Избранное':collection?'Новая коллекция':'Каталог сумок'}</h2></div><span>В наличии и под заказ</span></div>
- <BrandNotice/>
- <div className="categories"><button className={!cats.length?'active':''} onClick={()=>setCats([])}>Все модели <small>{products.length}</small></button>{categories.map(x=><button key={x} className={cats.includes(x)?'active':''} onClick={()=>{setCats(cats.length===1&&cats[0]===x?[]:[x]);setLimit(9)}}>{x} <small>{products.filter(p=>p.category===x).length}</small></button>)}</div>
- <div className="catalog-layout"><aside className="filters">{filters}</aside><section className="results"><div className="results-heading"><span aria-live="polite">Найдено: {filtered.length} {favoriteMode?'в избранном':'товаров'}</span><button className="mobile-filter" onClick={()=>setFiltersOpen(true)}><SlidersHorizontal size={16}/>Фильтры {activeCount>0&&'('+activeCount+')'}</button><select aria-label="Сортировка" value={sort} onChange={e=>setSort(e.target.value)}><option value="new">Сначала новые</option><option value="popular">По популярности</option><option value="price-up">Сначала дешевле</option><option value="price-down">Сначала дороже</option></select></div>
- {products.some(p=>p.demo)&&<p className="demo-note">В каталоге есть демонстрационные модели. Их можно заменить реальными товарами через админку.</p>}
- {error&&<div role="alert" className="empty-state"><p>{error}</p><Button onClick={async()=>{try{const r=await fetch('/api/products');if(!r.ok)throw new Error();setProducts(await r.json());setError('')}catch{setError('Каталог пока недоступен. Попробуйте позже.')}}}>Повторить</Button></div>}
- {!error&&filtered.length===0&&<div className="empty-state"><ShoppingBag size={38}/><h3>{favoriteMode?'Здесь будут ваши любимые модели':'Подходящих моделей пока нет'}</h3><p>{favoriteMode?'Нажмите на сердечко на карточке товара.':'Попробуйте изменить фильтры или поисковый запрос.'}</p><Button variant="outline" onClick={reset}>Вернуться ко всем товарам</Button></div>}
- <div className="product-grid">{filtered.slice(0,limit).map(p=><article className="product" key={p.id}><CatalogCardImage product={p} color={cardColor(p)} disabled={!!details||cartOpen||filtersOpen} onOpen={()=>open(p)}/>{p.badge&&<span className={'badge '+(p.oldPrice?'sale':'')}>{p.badge}</span>}<button className={'favorite-button '+(favorites.includes(p.id)?'is-favorite':'')} onClick={()=>fav(p.id)} aria-label={(favorites.includes(p.id)?'Убрать из избранного: ':'В избранное: ')+p.name} aria-pressed={favorites.includes(p.id)}><Heart size={22}/></button><div className="product-info"><button className="product-name" onClick={()=>open(p)}>{p.category==='Сумки'?'Сумка':p.category==='Шопперы'?'Шоппер':p.category==='Рюкзаки'?'Рюкзак':p.category==='Клатчи'?'Клатч':p.category==='Кросс-боди'?'Кросс-боди':''} {p.name}</button><p>{p.material} <span>·</span> {p.stock}</p><div className="product-bottom"><div><strong className={p.oldPrice?'sale-price':''}>{money(p.price)}</strong>{p.oldPrice&&<del>{money(p.oldPrice)}</del>}</div><div className="mini-swatches">{p.colors.map(c=><button type="button" key={c} title={c} aria-label={"Выбрать цвет "+c+": "+p.name} aria-pressed={cardColor(p)===c} className={cardColor(p)===c?"selected":""} style={{background:colors.find(x=>x.name===c)?.hex}} onClick={()=>setCardColors(prev=>({...prev,[p.id]:c}))}/>)}</div></div></div></article>)}</div>
- {filtered.length>limit&&<button className="load-more" onClick={()=>setLimit(limit+9)}>Показать ещё <ArrowRight size={16}/></button>}</section></div>
- <section className="benefits" id="about"><div><Leaf/><span>Эко-материалы<small>Красота с заботой о деталях</small></span></div><div><ShieldCheck/><span>Выбирайте с любовью<small>На каждый день и особый случай</small></span></div><div id="delivery"><Truck/><span>Доставка и оплата<small>Условия уточняйте в WhatsApp</small></span></div><div><MapPin/><span>Приходите в гости<small>Грозный · Орзамиева 17 (во двор)</small></span></div></section>
- <footer id="footer"><Logo/><div><p>На каждый день и на особые случаи.</p><span>Грозный · Орзамиева 17 (во двор)</span></div><div className="footer-links"><a href="https://instagram.com/uniquel.bags" target="_blank" rel="noreferrer"><Camera size={16}/>uniquel.bags</a><a href="https://t.me/uniquel_bags" target="_blank" rel="noreferrer" aria-label="Telegram UNIQUEL BAGS"><Send size={16}/>Telegram</a><a href="https://wa.me/79332152529" target="_blank" rel="noreferrer"><svg width={16} height={16} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.52 3.48A11.9 11.9 0 0 0 12.05 0C5.46 0 .1 5.36.1 11.95c0 2.1.55 4.16 1.6 5.97L0 24l6.25-1.64a11.96 11.96 0 0 0 5.8 1.48h.01c6.59 0 11.95-5.36 11.95-11.95 0-3.19-1.24-6.19-3.49-8.41ZM12.06 21.82a9.9 9.9 0 0 1-5.05-1.38l-.36-.21-3.71.97.99-3.62-.24-.37a9.88 9.88 0 0 1-1.52-5.26c0-5.48 4.46-9.94 9.94-9.94a9.87 9.87 0 0 1 7.03 2.91 9.88 9.88 0 0 1 2.91 7.03c0 5.48-4.46 9.94-9.99 9.87Zm5.45-7.44c-.3-.15-1.77-.87-2.04-.97-.28-.1-.48-.15-.68.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.65.07-.3-.15-1.26-.46-2.4-1.48-.88-.78-1.48-1.75-1.65-2.05-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.52.15-.18.2-.3.3-.5.1-.2.05-.38-.03-.53-.07-.15-.67-1.62-.92-2.22-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.8.37-.27.3-1.04 1.02-1.04 2.49 0 1.47 1.07 2.89 1.22 3.09.15.2 2.1 3.2 5.1 4.49.71.3 1.27.48 1.7.61.71.23 1.36.2 1.87.12.57-.08 1.77-.72 2.02-1.42.25-.7.25-1.29.17-1.42-.07-.12-.27-.2-.57-.35Z"/></svg>WhatsApp</a></div></footer><div className="footer-bottom"><span>© {new Date().getFullYear()} UNIQUEL BAGS</span><a href="/admin">Вход администратора</a></div>
- <div className="mobile-nav"><a href="#catalog" onClick={reset}><Grid2X2/><span>Каталог</span></a><button onClick={()=>{setFavoriteMode(!favoriteMode);document.getElementById('catalog')?.scrollIntoView()}}><Heart/><span>Избранное</span></button><button onClick={()=>setCartOpen(true)}><ShoppingBag/><span>Корзина {cartCount>0&&'('+cartCount+')'}</span></button><a href="https://wa.me/79332152529" target="_blank" rel="noreferrer"><MapPin/><span>Связаться</span></a></div>
- <Dialog open={filtersOpen} onOpenChange={setFiltersOpen}><DialogContent className="filter-dialog"><DialogTitle>Подобрать сумку</DialogTitle><DialogDescription>Фильтры применяются автоматически.</DialogDescription>{filters}<Button onClick={()=>setFiltersOpen(false)}>Показать товары: {filtered.length}</Button></DialogContent></Dialog>
- <Dialog open={!!details} onOpenChange={v=>{if(!v)setDetails(null)}}><DialogContent className="detail-dialog"><DialogTitle>{details?.name}</DialogTitle><DialogDescription>{details?.category} · {details?.material}</DialogDescription>{details&&<div className="detail-grid"><section className="detail-gallery" aria-label="Фотографии товара"><img className="detail-gallery-main" key={gallery[photoIndex]??gallery[0]} src={gallery[photoIndex]??gallery[0]} alt={details.name+(chosenColor?' · '+chosenColor:'')+(gallery.length>1?' · фото '+(photoIndex+1):'')} onError={e=>{e.currentTarget.src='/image-unavailable.svg'}}/>{gallery.length>1&&<div className="detail-gallery-thumbnails" aria-label="Выбрать фотографию">{gallery.map((src,index)=><button type="button" key={index} aria-label={'Фото '+(index+1)+' из '+gallery.length} aria-pressed={photoIndex===index} onClick={()=>setPhotoIndex(index)}><img src={src} alt="" loading="lazy" onError={e=>{e.currentTarget.src='/image-unavailable.svg'}}/></button>)}</div>}</section><div><p className="eyebrow">{details.stock}</p><h2>{details.name}</h2><p className="detail-price">{money(details.price)} {details.oldPrice&&<del>{money(details.oldPrice)}</del>}</p>{details.size&&<p className="detail-description">Размер: {details.size}</p>}{details.description&&<p className="detail-description">{details.description}</p>}<p>{chosenColor?'Цвет: '+chosenColor:'Цвет не указан'}</p><div className="swatches">{details.colors.map(c=><button key={c} title={c} aria-label={'Выбрать цвет '+c} aria-pressed={chosenColor===c} className={chosenColor===c?'selected':''} style={{background:colors.find(x=>x.name===c)?.hex}} onClick={()=>{setChosenColor(c);setPhotoIndex(0);setCardColors(prev=>({...prev,[details.id]:c}))}}/>)}</div><Button className="wide-button" onClick={()=>add(details,chosenColor)}><ShoppingBag/>Добавить в корзину</Button><a className="detail-contact" href={whatsapp('Здравствуйте! Интересует '+details.name+(chosenColor?', '+chosenColor:'')+', '+money(details.price)+'.')} target="_blank" rel="noreferrer">Уточнить наличие в WhatsApp <ArrowUpRight size={16}/></a>{details.demo&&<p className="demo-note">Демонстрационная модель. Фото иллюстративное.</p>}</div></div>}</DialogContent></Dialog>
- <Dialog open={cartOpen} onOpenChange={setCartOpen}><DialogContent className="cart-dialog"><DialogTitle>Ваша корзина</DialogTitle><DialogDescription>Соберите заказ и отправьте его магазину в WhatsApp.</DialogDescription><BrandNotice/>{cartRows.length===0?<div className="empty-state"><ShoppingBag size={36}/><h3>Пока здесь пусто</h3><p>Откройте понравившуюся модель и добавьте её в корзину.</p><Button onClick={()=>setCartOpen(false)}>Продолжить выбирать</Button></div>:<><div className="cart-rows">{cartRows.map(r=><div className="cart-row" key={r.key}><img src={productImage(r.product!,r.color)} alt={r.product!.name+(r.color?" · "+r.color:"")} onError={e=>{e.currentTarget.src="/image-unavailable.svg"}}/><div><strong>{r.product!.name}</strong><p>{r.color||'Цвет не указан'}</p><span>{money(r.product!.price*r.qty)}</span></div><div className="qty"><button aria-label={'Уменьшить '+r.product!.name} onClick={()=>cartChange(r.key,-1)}><Minus size={14}/></button><span>{r.qty}</span><button aria-label={'Увеличить '+r.product!.name} disabled={r.qty>=99} onClick={()=>cartChange(r.key,1)}><Plus size={14}/></button></div><button aria-label={'Удалить '+r.product!.name} onClick={()=>setCart(prev=>{const next={...prev};delete next[r.key];return next})}><Trash2 size={16}/></button></div>)}</div><div className="cart-total"><span>Итого</span><strong>{money(cartTotal)}</strong></div><button className="gold-button" type="button" disabled={checkoutBusy} onClick={()=>void checkout()}>{checkoutBusy?'Сохраняем заказ…':'Отправить заказ в WhatsApp'} <ArrowUpRight size={17}/></button>{checkoutError&&<p className="field-error" role="alert">{checkoutError}</p>}{savedOrder&&<p className="order-share-links"><a href={savedOrder.url} target="_blank" rel="noreferrer">Открыть заказ с фотографиями</a><a href={savedOrder.whatsappUrl} target="_blank" rel="noreferrer">Перейти в WhatsApp</a></p>}<p className="demo-note">Доставка оплачивается отдельно. Наличие и окончательную стоимость подтвердит магазин.</p></>}</DialogContent></Dialog>
- {notice&&<div className="toast" role="status">{notice}</div>}</main>
+"use client";
+import { useEffect, useMemo, useState } from "react";
+import {
+  ArrowUpRight,
+  Heart,
+  Search,
+  ShoppingBag,
+  SlidersHorizontal,
+  ArrowRight,
+  Leaf,
+  Truck,
+  MapPin,
+  ShieldCheck,
+  Minus,
+  Plus,
+  Trash2,
+  Grid2X2,
+  Camera,
+  Send,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  categories,
+  materials,
+  colors,
+  money,
+  productImage,
+  productGallery,
+  primaryColor,
+  type Product,
+} from "@/lib/products";
+import { Logo } from "@/components/logo";
+import { CatalogCardImage } from "@/components/catalog-card-image";
+function BrandNotice() {
+  return (
+    <aside className="brand-notice" aria-label="О товарах магазина">
+      <ShieldCheck size={20} aria-hidden="true" />
+      <div>
+        <strong>Копий брендов нет</strong>
+        <p>Заказы на реплики не принимаем.</p>
+      </div>
+    </aside>
+  );
+}
+export default function Catalog({
+  initialProducts,
+  initialError = "",
+}: {
+  initialProducts: Product[];
+  initialError?: string;
+}) {
+  const [cardColors, setCardColors] = useState<Record<string, string>>({});
+  const [photoIndex, setPhotoIndex] = useState(0);
+  const [checkoutBusy, setCheckoutBusy] = useState(false),
+    [checkoutError, setCheckoutError] = useState("");
+  const [savedOrder, setSavedOrder] = useState<{
+    url: string;
+    whatsappUrl: string;
+  } | null>(null);
+  const [products, setProducts] = useState(initialProducts),
+    [error, setError] = useState(initialError),
+    [cats, setCats] = useState<string[]>([]),
+    [mats, setMats] = useState<string[]>([]),
+    [color, setColor] = useState(""),
+    [min, setMin] = useState(""),
+    [max, setMax] = useState(""),
+    [query, setQuery] = useState(""),
+    [sort, setSort] = useState("new"),
+    [onlyStock, setOnlyStock] = useState(false),
+    [favoriteMode, setFavoriteMode] = useState(false),
+    [favorites, setFavorites] = useState<string[]>([]),
+    [limit, setLimit] = useState(9),
+    [filtersOpen, setFiltersOpen] = useState(false),
+    [searchOpen, setSearchOpen] = useState(false),
+    [details, setDetails] = useState<Product | null>(null),
+    [chosenColor, setChosenColor] = useState(""),
+    [cart, setCart] = useState<Record<string, number>>({}),
+    [cartOpen, setCartOpen] = useState(false),
+    [notice, setNotice] = useState(""),
+    [collection, setCollection] = useState(false);
+  useEffect(() => {
+    try {
+      const f = JSON.parse(localStorage.getItem("uniquel-favorites") || "[]");
+      if (Array.isArray(f))
+        setFavorites(f.filter((x) => typeof x === "string"));
+    } catch {}
+  }, []);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(""), 3000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+  const toggle = (x: string, list: string[], set: (v: string[]) => void) => {
+    set(list.includes(x) ? list.filter((y) => y !== x) : [...list, x]);
+    setLimit(9);
+  };
+  const fav = (id: string) => {
+    const next = favorites.includes(id)
+      ? favorites.filter((x) => x !== id)
+      : [...favorites, id];
+    setFavorites(next);
+    try {
+      localStorage.setItem("uniquel-favorites", JSON.stringify(next));
+    } catch {}
+  };
+  const reset = () => {
+    setCats([]);
+    setMats([]);
+    setColor("");
+    setMin("");
+    setMax("");
+    setOnlyStock(false);
+    setQuery("");
+    setFavoriteMode(false);
+    setCollection(false);
+    setLimit(9);
+  };
+  const filtered = useMemo(
+    () =>
+      products
+        .filter(
+          (p) =>
+            (!cats.length || cats.includes(p.category)) &&
+            (!mats.length || mats.includes(p.material)) &&
+            (!color || p.colors.includes(color)) &&
+            (!min || p.price >= Number(min)) &&
+            (!max || p.price <= Number(max)) &&
+            (!onlyStock || p.stock === "В наличии") &&
+            (!favoriteMode || favorites.includes(p.id)) &&
+            (!collection || p.badge === "Новинка") &&
+            (!query ||
+              [p.name, p.category, p.description]
+                .join(" ")
+                .toLowerCase()
+                .includes(query.toLowerCase())),
+        )
+        .sort((a, b) =>
+          sort === "price-up"
+            ? a.price - b.price
+            : sort === "price-down"
+              ? b.price - a.price
+              : sort === "new"
+                ? b.createdAt.localeCompare(a.createdAt)
+                : Number(b.badge === "Хит") - Number(a.badge === "Хит"),
+        ),
+    [
+      products,
+      cats,
+      mats,
+      color,
+      min,
+      max,
+      onlyStock,
+      favoriteMode,
+      favorites,
+      collection,
+      query,
+      sort,
+    ],
+  );
+  const activeCount =
+    cats.length +
+    mats.length +
+    Number(!!color) +
+    Number(!!min || !!max) +
+    Number(onlyStock);
+  const cardColor = (p: Product) =>
+    [cardColors[p.id], color, primaryColor(p)].find(
+      (c) => c && p.colors.includes(c),
+    ) ?? "";
+  const open = (p: Product) => {
+    setDetails(p);
+    setChosenColor(cardColor(p));
+    setPhotoIndex(0);
+  };
+  const gallery = details ? productGallery(details, chosenColor) : [];
+  const cartRows = Object.entries(cart)
+    .map(([key, qty]) => {
+      const [id, c] = key.split("|");
+      return { key, qty, color: c, product: products.find((p) => p.id === id) };
+    })
+    .filter((r) => r.product);
+  const cartTotal = cartRows.reduce((s, r) => s + r.product!.price * r.qty, 0),
+    cartCount = cartRows.reduce((s, r) => s + r.qty, 0);
+  const cartChange = (key: string, delta: number) =>
+    setCart((prev) => {
+      const next = { ...prev };
+      next[key] = Math.max(0, Math.min(99, (next[key] || 0) + delta));
+      if (!next[key]) delete next[key];
+      return next;
+    });
+  const add = (p: Product, c: string) => {
+    cartChange(p.id + "|" + c, 1);
+    setNotice("Товар добавлен в корзину");
+  };
+  async function checkout() {
+    if (checkoutBusy) return;
+    setCheckoutBusy(true);
+    setCheckoutError("");
+    setSavedOrder(null);
+    try {
+      const response = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: cartRows.map((row) => ({
+            productId: row.product!.id,
+            color: row.color,
+            quantity: row.qty,
+          })),
+        }),
+      });
+      const data = (await response.json()) as {
+        url?: string;
+        whatsappUrl?: string;
+        error?: string;
+      };
+      if (!response.ok || !data.url || !data.whatsappUrl)
+        throw new Error(data.error || "Не удалось сохранить заказ");
+      setSavedOrder({ url: data.url, whatsappUrl: data.whatsappUrl });
+      window.location.assign(data.whatsappUrl);
+    } catch (error) {
+      setCheckoutError(
+        error instanceof Error
+          ? error.message
+          : "Не удалось сохранить заказ. Попробуйте ещё раз",
+      );
+    } finally {
+      setCheckoutBusy(false);
+    }
+  }
+  const whatsapp = (text: string) =>
+    "https://wa.me/79332152529?text=" + encodeURIComponent(text);
+  const filters = (
+    <>
+      <div className="filter-heading">
+        <span>Фильтры</span>
+        <button onClick={reset}>Сбросить</button>
+      </div>
+      <div className="filter-group">
+        <h3>Категория</h3>
+        {categories.map((x) => (
+          <label className="check-row" key={x}>
+            <input
+              type="checkbox"
+              checked={cats.includes(x)}
+              onChange={() => toggle(x, cats, setCats)}
+            />
+            <span>{x}</span>
+            <small>{products.filter((p) => p.category === x).length}</small>
+          </label>
+        ))}
+      </div>
+      <div className="filter-group">
+        <h3>
+          Цвет <small>{color}</small>
+        </h3>
+        <div className="swatches">
+          {colors.map((c) => (
+            <button
+              key={c.name}
+              title={c.name}
+              aria-label={c.name}
+              aria-pressed={color === c.name}
+              className={color === c.name ? "selected" : ""}
+              style={{ background: c.hex }}
+              onClick={() => setColor(color === c.name ? "" : c.name)}
+            />
+          ))}
+        </div>
+      </div>
+      <div className="filter-group">
+        <h3>Материал</h3>
+        {materials.map((x) => (
+          <label className="check-row" key={x}>
+            <input
+              type="checkbox"
+              checked={mats.includes(x)}
+              onChange={() => toggle(x, mats, setMats)}
+            />
+            {x}
+          </label>
+        ))}
+      </div>
+      <div className="filter-group">
+        <h3>Цена, ₽</h3>
+        <div className="price-fields">
+          <Input
+            aria-label="Минимальная цена"
+            placeholder="От"
+            type="number"
+            min="0"
+            value={min}
+            onChange={(e) => setMin(e.target.value)}
+          />
+          <span>—</span>
+          <Input
+            aria-label="Максимальная цена"
+            placeholder="До"
+            type="number"
+            min="0"
+            value={max}
+            onChange={(e) => setMax(e.target.value)}
+          />
+        </div>
+        {min && max && Number(min) > Number(max) && (
+          <p className="field-error">Цена «от» должна быть меньше цены «до»</p>
+        )}
+      </div>
+      <label className="check-row">
+        <input
+          type="checkbox"
+          checked={onlyStock}
+          onChange={(e) => setOnlyStock(e.target.checked)}
+        />
+        Только в наличии
+      </label>
+      <div className="custom-order">
+        <p className="eyebrow">ПОМОЖЕМ ВЫБРАТЬ</p>
+        <h3>Ваша идеальная сумка</h3>
+        <p>Расскажите, какую модель ищете. Поможем подобрать цвет и форму.</p>
+        <a
+          href={whatsapp("Здравствуйте! Помогите подобрать сумку.")}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Написать нам <ArrowUpRight size={16} />
+        </a>
+      </div>
+    </>
+  );
+  return (
+    <main className="shell">
+      <header>
+        <Logo />
+        <div className="header-actions">
+          <button aria-label="Поиск" onClick={() => setSearchOpen(!searchOpen)}>
+            <Search size={21} />
+          </button>
+          <button
+            className={favoriteMode ? "highlight" : ""}
+            aria-label="Избранное"
+            onClick={() => {
+              setFavoriteMode(!favoriteMode);
+              document.getElementById("catalog")?.scrollIntoView();
+            }}
+          >
+            <Heart size={21} />
+            {favorites.length > 0 && <small>{favorites.length}</small>}
+          </button>
+          <button aria-label="Корзина" onClick={() => setCartOpen(true)}>
+            <ShoppingBag size={21} />
+            {cartCount > 0 && <small>{cartCount}</small>}
+          </button>
+        </div>
+      </header>
+      {searchOpen && (
+        <div className="search-bar">
+          <Search size={18} />
+          <Input
+            autoFocus
+            placeholder="Найти свою сумку…"
+            aria-label="Поиск товаров"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+      )}
+      <section className="hero">
+        <div className="hero-copy">
+          <p className="eyebrow">UNIQUEL BAGS · С ЛЮБОВЬЮ К ДЕТАЛЯМ</p>
+          <h1>
+            На каждый день.
+            <br />
+            На особые случаи
+          </h1>
+          <p>
+            Любимая сумка — больше, чем аксессуар.
+            <br />
+            Найдите ту, что расскажет вашу историю.
+          </p>
+          <a className="gold-button" href="#catalog">
+            Смотреть коллекцию <ArrowRight size={18} aria-hidden="true" />
+          </a>
+          <div className="hero-caption">Эко-материалы высокого качества</div>
+        </div>
+        <picture>
+          <source media="(max-width: 600px)" srcSet="/hero_bg.png" />
+          <img src="/hero.png" alt="Сумки UNIQUEL BAGS" />
+        </picture>
+        <span className="hero-note"></span>
+      </section>
+      <div className="section-title" id="catalog">
+        <div>
+          <p className="eyebrow">ВАША НОВАЯ ЛЮБИМАЯ</p>
+          <h2>
+            {favoriteMode
+              ? "Избранное"
+              : collection
+                ? "Новая коллекция"
+                : "Каталог сумок"}
+          </h2>
+        </div>
+        <span>В наличии и под заказ</span>
+      </div>
+      <BrandNotice />
+      <div className="categories">
+        <button
+          className={!cats.length ? "active" : ""}
+          onClick={() => setCats([])}
+        >
+          Все модели <small>{products.length}</small>
+        </button>
+        {categories.map((x) => (
+          <button
+            key={x}
+            className={cats.includes(x) ? "active" : ""}
+            onClick={() => {
+              setCats(cats.length === 1 && cats[0] === x ? [] : [x]);
+              setLimit(9);
+            }}
+          >
+            {x} <small>{products.filter((p) => p.category === x).length}</small>
+          </button>
+        ))}
+      </div>
+      <div className="catalog-layout">
+        <aside className="filters">{filters}</aside>
+        <section className="results">
+          <div className="results-heading">
+            <span aria-live="polite">
+              Найдено: {filtered.length}{" "}
+              {favoriteMode ? "в избранном" : "товаров"}
+            </span>
+            <button
+              className="mobile-filter"
+              onClick={() => setFiltersOpen(true)}
+            >
+              <SlidersHorizontal size={16} />
+              Фильтры {activeCount > 0 && "(" + activeCount + ")"}
+            </button>
+            <select
+              aria-label="Сортировка"
+              value={sort}
+              onChange={(e) => setSort(e.target.value)}
+            >
+              <option value="new">Сначала новые</option>
+              <option value="popular">По популярности</option>
+              <option value="price-up">Сначала дешевле</option>
+              <option value="price-down">Сначала дороже</option>
+            </select>
+          </div>
+          {products.some((p) => p.demo) && (
+            <p className="demo-note">
+              В каталоге есть демонстрационные модели. Их можно заменить
+              реальными товарами через админку.
+            </p>
+          )}
+          {error && (
+            <div role="alert" className="empty-state">
+              <p>{error}</p>
+              <Button
+                onClick={async () => {
+                  try {
+                    const r = await fetch("/api/products");
+                    if (!r.ok) throw new Error();
+                    setProducts(await r.json());
+                    setError("");
+                  } catch {
+                    setError("Каталог пока недоступен. Попробуйте позже.");
+                  }
+                }}
+              >
+                Повторить
+              </Button>
+            </div>
+          )}
+          {!error && filtered.length === 0 && (
+            <div className="empty-state">
+              <ShoppingBag size={38} />
+              <h3>
+                {favoriteMode
+                  ? "Здесь будут ваши любимые модели"
+                  : "Подходящих моделей пока нет"}
+              </h3>
+              <p>
+                {favoriteMode
+                  ? "Нажмите на сердечко на карточке товара."
+                  : "Попробуйте изменить фильтры или поисковый запрос."}
+              </p>
+              <Button variant="outline" onClick={reset}>
+                Вернуться ко всем товарам
+              </Button>
+            </div>
+          )}
+          <div className="product-grid">
+            {filtered.slice(0, limit).map((p) => (
+              <article className="product" key={p.id}>
+                <CatalogCardImage
+                  product={p}
+                  color={cardColor(p)}
+                  disabled={!!details || cartOpen || filtersOpen}
+                  onOpen={() => open(p)}
+                />
+                {p.badge && (
+                  <span className={"badge " + (p.oldPrice ? "sale" : "")}>
+                    {p.badge}
+                  </span>
+                )}
+                <button
+                  className={
+                    "favorite-button " +
+                    (favorites.includes(p.id) ? "is-favorite" : "")
+                  }
+                  onClick={() => fav(p.id)}
+                  aria-label={
+                    (favorites.includes(p.id)
+                      ? "Убрать из избранного: "
+                      : "В избранное: ") + p.name
+                  }
+                  aria-pressed={favorites.includes(p.id)}
+                >
+                  <Heart size={22} />
+                </button>
+                <div className="product-info">
+                  <button className="product-name" onClick={() => open(p)}>
+                    {p.category === "Сумки"
+                      ? "Сумка"
+                      : p.category === "Шопперы"
+                        ? "Шоппер"
+                        : p.category === "Рюкзаки"
+                          ? "Рюкзак"
+                          : p.category === "Клатчи"
+                            ? "Клатч"
+                            : p.category === "Кросс-боди"
+                              ? "Кросс-боди"
+                              : ""}{" "}
+                    {p.name}
+                  </button>
+                  <p>
+                    {p.material} <span>·</span> {p.stock}
+                  </p>
+                  <div className="product-bottom">
+                    <div>
+                      <strong className={p.oldPrice ? "sale-price" : ""}>
+                        {money(p.price)}
+                      </strong>
+                      {p.oldPrice && <del>{money(p.oldPrice)}</del>}
+                    </div>
+                    <div className="mini-swatches">
+                      {p.colors.map((c) => (
+                        <button
+                          type="button"
+                          key={c}
+                          title={c}
+                          aria-label={"Выбрать цвет " + c + ": " + p.name}
+                          aria-pressed={cardColor(p) === c}
+                          className={cardColor(p) === c ? "selected" : ""}
+                          style={{
+                            background: colors.find((x) => x.name === c)?.hex,
+                          }}
+                          onClick={() =>
+                            setCardColors((prev) => ({ ...prev, [p.id]: c }))
+                          }
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+          {filtered.length > limit && (
+            <button className="load-more" onClick={() => setLimit(limit + 9)}>
+              Показать ещё <ArrowRight size={16} />
+            </button>
+          )}
+        </section>
+      </div>
+      <section className="benefits" id="about">
+        <div>
+          <Leaf />
+          <span>
+            Эко-материалы<small>Красота с заботой о деталях</small>
+          </span>
+        </div>
+        <div>
+          <ShieldCheck />
+          <span>
+            Выбирайте с любовью<small>На каждый день и особый случай</small>
+          </span>
+        </div>
+        <div id="delivery">
+          <Truck />
+          <span>
+            Доставка и оплата<small>Условия уточняйте в WhatsApp</small>
+          </span>
+        </div>
+        <div>
+          <MapPin />
+          <span>
+            Приходите в гости<small>Грозный · Орзамиева 17 (во двор)</small>
+          </span>
+        </div>
+      </section>
+      <footer id="footer">
+        <Logo />
+        <div>
+          <p>На каждый день и на особые случаи.</p>
+          <span>Грозный · Орзамиева 17 (во двор)</span>
+        </div>
+        <div className="footer-links">
+          <a
+            href="https://instagram.com/uniquel.bags"
+            target="_blank"
+            rel="noreferrer"
+          >
+            <Camera size={16} />
+            uniquel.bags
+          </a>
+          <a
+            href="https://t.me/uniquel_bags"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Telegram UNIQUEL BAGS"
+          >
+            <Send size={16} />
+            Telegram
+          </a>
+          <a href="https://wa.me/79332152529" target="_blank" rel="noreferrer">
+            <svg
+              width={16}
+              height={16}
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path d="M20.52 3.48A11.9 11.9 0 0 0 12.05 0C5.46 0 .1 5.36.1 11.95c0 2.1.55 4.16 1.6 5.97L0 24l6.25-1.64a11.96 11.96 0 0 0 5.8 1.48h.01c6.59 0 11.95-5.36 11.95-11.95 0-3.19-1.24-6.19-3.49-8.41ZM12.06 21.82a9.9 9.9 0 0 1-5.05-1.38l-.36-.21-3.71.97.99-3.62-.24-.37a9.88 9.88 0 0 1-1.52-5.26c0-5.48 4.46-9.94 9.94-9.94a9.87 9.87 0 0 1 7.03 2.91 9.88 9.88 0 0 1 2.91 7.03c0 5.48-4.46 9.94-9.99 9.87Zm5.45-7.44c-.3-.15-1.77-.87-2.04-.97-.28-.1-.48-.15-.68.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.65.07-.3-.15-1.26-.46-2.4-1.48-.88-.78-1.48-1.75-1.65-2.05-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.52.15-.18.2-.3.3-.5.1-.2.05-.38-.03-.53-.07-.15-.67-1.62-.92-2.22-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.8.37-.27.3-1.04 1.02-1.04 2.49 0 1.47 1.07 2.89 1.22 3.09.15.2 2.1 3.2 5.1 4.49.71.3 1.27.48 1.7.61.71.23 1.36.2 1.87.12.57-.08 1.77-.72 2.02-1.42.25-.7.25-1.29.17-1.42-.07-.12-.27-.2-.57-.35Z" />
+            </svg>
+            WhatsApp
+          </a>
+        </div>
+      </footer>
+      <div className="footer-bottom">
+        <span>© {new Date().getFullYear()} UNIQUEL BAGS</span>
+        <a href="/admin">Вход администратора</a>
+      </div>
+      <div className="mobile-nav">
+        <a href="#catalog" onClick={reset}>
+          <Grid2X2 />
+          <span>Каталог</span>
+        </a>
+        <button
+          onClick={() => {
+            setFavoriteMode(!favoriteMode);
+            document.getElementById("catalog")?.scrollIntoView();
+          }}
+        >
+          <Heart />
+          <span>Избранное</span>
+        </button>
+        <button onClick={() => setCartOpen(true)}>
+          <ShoppingBag />
+          <span>Корзина {cartCount > 0 && "(" + cartCount + ")"}</span>
+        </button>
+        <a href="https://wa.me/79332152529" target="_blank" rel="noreferrer">
+          <MapPin />
+          <span>Связаться</span>
+        </a>
+      </div>
+      <Dialog open={filtersOpen} onOpenChange={setFiltersOpen}>
+        <DialogContent className="filter-dialog">
+          <DialogTitle>Подобрать сумку</DialogTitle>
+          <DialogDescription>
+            Фильтры применяются автоматически.
+          </DialogDescription>
+          {filters}
+          <Button onClick={() => setFiltersOpen(false)}>
+            Показать товары: {filtered.length}
+          </Button>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={!!details}
+        onOpenChange={(v) => {
+          if (!v) setDetails(null);
+        }}
+      >
+        <DialogContent className="detail-dialog">
+          <DialogTitle>{details?.name}</DialogTitle>
+          <DialogDescription>
+            {details?.category} · {details?.material}
+          </DialogDescription>
+          {details && (
+            <div className="detail-grid">
+              <section
+                className="detail-gallery"
+                aria-label="Фотографии товара"
+              >
+                <img
+                  className="detail-gallery-main"
+                  key={gallery[photoIndex] ?? gallery[0]}
+                  src={gallery[photoIndex] ?? gallery[0]}
+                  alt={
+                    details.name +
+                    (chosenColor ? " · " + chosenColor : "") +
+                    (gallery.length > 1 ? " · фото " + (photoIndex + 1) : "")
+                  }
+                  onError={(e) => {
+                    e.currentTarget.src = "/image-unavailable.svg";
+                  }}
+                />
+                {gallery.length > 1 && (
+                  <div
+                    className="detail-gallery-thumbnails"
+                    aria-label="Выбрать фотографию"
+                  >
+                    {gallery.map((src, index) => (
+                      <button
+                        type="button"
+                        key={index}
+                        aria-label={
+                          "Фото " + (index + 1) + " из " + gallery.length
+                        }
+                        aria-pressed={photoIndex === index}
+                        onClick={() => setPhotoIndex(index)}
+                      >
+                        <img
+                          src={src}
+                          alt=""
+                          loading="lazy"
+                          onError={(e) => {
+                            e.currentTarget.src = "/image-unavailable.svg";
+                          }}
+                        />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
+              <div>
+                <p className="eyebrow">{details.stock}</p>
+                <h2>{details.name}</h2>
+                <p className="detail-price">
+                  {money(details.price)}{" "}
+                  {details.oldPrice && <del>{money(details.oldPrice)}</del>}
+                </p>
+                {details.size && (
+                  <p className="detail-description">Размер: {details.size}</p>
+                )}
+                {details.description && (
+                  <p className="detail-description">{details.description}</p>
+                )}
+                <p>{chosenColor ? "Цвет: " + chosenColor : "Цвет не указан"}</p>
+                <div className="swatches">
+                  {details.colors.map((c) => (
+                    <button
+                      key={c}
+                      title={c}
+                      aria-label={"Выбрать цвет " + c}
+                      aria-pressed={chosenColor === c}
+                      className={chosenColor === c ? "selected" : ""}
+                      style={{
+                        background: colors.find((x) => x.name === c)?.hex,
+                      }}
+                      onClick={() => {
+                        setChosenColor(c);
+                        setPhotoIndex(0);
+                        setCardColors((prev) => ({ ...prev, [details.id]: c }));
+                      }}
+                    />
+                  ))}
+                </div>
+                <Button
+                  className="wide-button"
+                  onClick={() => add(details, chosenColor)}
+                >
+                  <ShoppingBag />
+                  Добавить в корзину
+                </Button>
+                <a
+                  className="detail-contact"
+                  href={whatsapp(
+                    "Здравствуйте! Интересует " +
+                      details.name +
+                      (chosenColor ? ", " + chosenColor : "") +
+                      ", " +
+                      money(details.price) +
+                      ".",
+                  )}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Уточнить наличие в WhatsApp <ArrowUpRight size={16} />
+                </a>
+                {details.demo && (
+                  <p className="demo-note">
+                    Демонстрационная модель. Фото иллюстративное.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={cartOpen} onOpenChange={setCartOpen}>
+        <DialogContent className="cart-dialog">
+          <DialogTitle>Ваша корзина</DialogTitle>
+          <DialogDescription>
+            Соберите заказ и отправьте его магазину в WhatsApp.
+          </DialogDescription>
+          <BrandNotice />
+          {cartRows.length === 0 ? (
+            <div className="empty-state">
+              <ShoppingBag size={36} />
+              <h3>Пока здесь пусто</h3>
+              <p>Откройте понравившуюся модель и добавьте её в корзину.</p>
+              <Button onClick={() => setCartOpen(false)}>
+                Продолжить выбирать
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div className="cart-rows">
+                {cartRows.map((r) => (
+                  <div className="cart-row" key={r.key}>
+                    <img
+                      src={productImage(r.product!, r.color)}
+                      alt={r.product!.name + (r.color ? " · " + r.color : "")}
+                      onError={(e) => {
+                        e.currentTarget.src = "/image-unavailable.svg";
+                      }}
+                    />
+                    <div>
+                      <strong>{r.product!.name}</strong>
+                      <p>{r.color || "Цвет не указан"}</p>
+                      <span>{money(r.product!.price * r.qty)}</span>
+                    </div>
+                    <div className="qty">
+                      <button
+                        aria-label={"Уменьшить " + r.product!.name}
+                        onClick={() => cartChange(r.key, -1)}
+                      >
+                        <Minus size={14} />
+                      </button>
+                      <span>{r.qty}</span>
+                      <button
+                        aria-label={"Увеличить " + r.product!.name}
+                        disabled={r.qty >= 99}
+                        onClick={() => cartChange(r.key, 1)}
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                    <button
+                      aria-label={"Удалить " + r.product!.name}
+                      onClick={() =>
+                        setCart((prev) => {
+                          const next = { ...prev };
+                          delete next[r.key];
+                          return next;
+                        })
+                      }
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="cart-total">
+                <span>Итого</span>
+                <strong>{money(cartTotal)}</strong>
+              </div>
+              <button
+                className="gold-button"
+                type="button"
+                disabled={checkoutBusy}
+                onClick={() => void checkout()}
+              >
+                {checkoutBusy
+                  ? "Сохраняем заказ…"
+                  : "Отправить заказ в WhatsApp"}{" "}
+                <ArrowUpRight size={17} />
+              </button>
+              {checkoutError && (
+                <p className="field-error" role="alert">
+                  {checkoutError}
+                </p>
+              )}
+              {savedOrder && (
+                <p className="order-share-links">
+                  <a href={savedOrder.url} target="_blank" rel="noreferrer">
+                    Открыть заказ с фотографиями
+                  </a>
+                  <a
+                    href={savedOrder.whatsappUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Перейти в WhatsApp
+                  </a>
+                </p>
+              )}
+              <p className="demo-note">
+                Доставка оплачивается отдельно. Наличие и окончательную
+                стоимость подтвердит магазин.
+              </p>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+      {notice && (
+        <div className="toast" role="status">
+          {notice}
+        </div>
+      )}
+    </main>
+  );
 }

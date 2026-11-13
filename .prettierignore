@@ -1,0 +1,27 @@
+# Dependencies and generated output
+node_modules/
+.next/
+.vinext/
+out/
+build/
+dist/
+coverage/
+.wrangler/
+.vercel/
+outputs/
+work/
+next-env.d.ts
+*.tsbuildinfo
+
+# Local data, environment files, and static assets
+data/
+.env*
+!.env.example
+public/
+
+# Package-manager-generated lockfiles
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+bun.lock
+bun.lockb

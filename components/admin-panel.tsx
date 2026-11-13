@@ -1,33 +1,905 @@
-'use client';
-import {Logo} from '@/components/logo';
-import {useState,type FormEvent} from 'react';import {ArrowLeft,Plus,Search,Pencil,Archive,RotateCcw,ImagePlus,ExternalLink,Check,Package,Tag} from 'lucide-react';
-import {Button} from '@/components/ui/button';import {Input} from '@/components/ui/input';import {Dialog,DialogContent,DialogTitle,DialogDescription} from '@/components/ui/dialog';import {categories,materials,colors,money,MAX_COLOR_PHOTOS,type Product} from '@/lib/products';
-import {setProductPhoto,editProductPhoto,toggleProductColor,assignedColorPhotos,addColorPhoto,replaceColorPhoto,removeColorPhoto} from '@/lib/product-photos';
-import {PhotoEditor,type PhotoEditorSelection} from '@/components/photo-editor';
-const blank={name:'',category:'Сумки',material:'Экокожа',colors:[],colorImages:{},price:0,oldPrice:null,description:'',size:'',image:'',stock:'В наличии',badge:'',demo:false} as Omit<Product,'id'|'archived'|'createdAt'>;
-export default function AdminPanel({initialProducts,email,initialError=''}:{initialProducts:Product[];email:string;initialError?:string}){
- const [photoColor,setPhotoColor]=useState('');
- const [photoIndex,setPhotoIndex]=useState(0),[photoUrl,setPhotoUrl]=useState('');
- const [photoEditor,setPhotoEditor]=useState<PhotoEditorSelection|null>(null);
- const [products,setProducts]=useState(initialProducts),[query,setQuery]=useState(''),[tab,setTab]=useState('active'),[dialog,setDialog]=useState(false),[editing,setEditing]=useState<string|null>(null),[draft,setDraft]=useState({...blank}),[error,setError]=useState(initialError),[formError,setFormError]=useState(''),[busy,setBusy]=useState(false),[uploading,setUploading]=useState(false),[notice,setNotice]=useState(''),[actionId,setActionId]=useState('');
- async function refresh(){const r=await fetch('/api/products?all=1');const data=await r.json() as Product[] & {error?:string};if(!r.ok)throw new Error(data.error);setProducts(data);setError('')}
- function start(p?:Product){setEditing(p?.id||null);setPhotoColor(p?.colors[0]??'');setPhotoIndex(0);setPhotoUrl('');setDraft(p?{...p,size:p.size??'',colors:[...p.colors],colorImages:{...p.colorImages,...(!Object.keys(p.colorImages??{}).length&&p.colors[0]?{[p.colors[0]]:p.image}:{})},colorPhotos:{...p.colorPhotos}}:{...blank,colors:[],colorImages:{}});setFormError('');setDialog(true);setNotice('')}
- async function save(e:FormEvent<HTMLFormElement>){e.preventDefault();if(busy||uploading)return;if(!draft.image.trim()){setPhotoColor(draft.colors[0]??'');setFormError('Загрузите первое фото товара');return;}setBusy(true);setFormError('');try{const r=await fetch(editing?'/api/products/'+editing:'/api/products',{method:editing?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(draft)});const data=await r.json() as Product & {error?:string};if(!r.ok)throw new Error(data.error);setProducts(prev=>editing?prev.map(p=>p.id===editing?data:p):[data,...prev]);setDialog(false);setNotice(editing?'Изменения сохранены':'Товар добавлен в каталог');}catch(e){setFormError(e instanceof Error?e.message:'Не удалось сохранить товар')}finally{setBusy(false)}}
- function selectPhotoColor(color:string){setPhotoColor(color);setPhotoIndex(0);setPhotoUrl('');setFormError('')}
- function toggleColor(color:string){const selected=draft.colors.includes(color);setDraft(d=>toggleProductColor(d,color));if(!selected)selectPhotoColor(color);else if(photoColor===color)selectPhotoColor(draft.colors.find(c=>c!==color)??'')}
- const gallery=photoColor?assignedColorPhotos(draft,photoColor):draft.image?[draft.image]:[];
- const previewImage=gallery[photoIndex]??gallery[0];
- function addPhotoUrl(){const image=photoUrl.trim();try{const url=new URL(image);if(url.protocol!=='https:')throw new Error();}catch{setFormError('Укажите ссылку на фото, начинающуюся с https://');return}if(image.length>2000){setFormError('Ссылка на фото слишком длинная');return}if(gallery.includes(image)){setFormError('Это фото уже добавлено');return}if(photoColor&&gallery.length>=MAX_COLOR_PHOTOS){setFormError('Для каждого цвета можно добавить до 10 фотографий');return}setDraft(d=>photoColor?addColorPhoto(d,image,photoColor):setProductPhoto(d,image));setPhotoIndex(photoColor?gallery.length:0);setPhotoUrl('');setFormError('')}
- function removePhoto(){if(!photoColor)return;setDraft(d=>removeColorPhoto(d,photoColor,photoIndex));setPhotoIndex(Math.max(0,Math.min(photoIndex,gallery.length-2)));setFormError('')}
- function choosePhoto(file?:File){if(!file)return;setFormError('');if(photoColor&&gallery.length>=MAX_COLOR_PHOTOS){setFormError('Для каждого цвета можно добавить до 10 фотографий');return;}if(file.size>8*1024*1024){setFormError('Максимальный размер фото — 8 МБ');return;}if(!['image/jpeg','image/png','image/webp'].includes(file.type)){setFormError('Поддерживаются только JPG, PNG и WebP');return;}setPhotoEditor({source:file,color:photoColor,replace:false})}
- async function uploadEditedPhoto(file:File){if(!photoEditor)return;const selection=photoEditor;setUploading(true);setFormError('');try{if(file.size>8*1024*1024)throw new Error('Максимальный размер фото — 8 МБ');const form=new FormData();form.append('file',file);const r=await fetch('/api/upload',{method:'POST',body:form});const data=await r.json() as {image:string;error?:string};if(!r.ok)throw new Error(data.error||'Не удалось загрузить фото');setDraft(d=>selection.color?(selection.replace?replaceColorPhoto(d,data.image,selection.color,selection.index??0):addColorPhoto(d,data.image,selection.color)):(selection.replace?editProductPhoto(d,data.image):setProductPhoto(d,data.image)));if(selection.color&&!selection.replace)setPhotoIndex(gallery.length);setPhotoEditor(null);}finally{setUploading(false)}}
- async function archive(p:Product){setActionId(p.id);setError('');try{const r=await fetch('/api/products/'+p.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({archived:!p.archived})});const data=await r.json() as {error?:string};if(!r.ok)throw new Error(data.error);setProducts(prev=>prev.map(x=>x.id===p.id?{...x,archived:!p.archived}:x));setNotice(p.archived?'Товар возвращён в каталог':'Товар скрыт из каталога. Его можно восстановить в архиве.');}catch(e){setError(e instanceof Error?e.message:'Не удалось изменить статус')}finally{setActionId('')}}
- async function logout(){await fetch('/api/auth/logout',{method:'POST'});window.location.assign('/')}
- const listed=products.filter(p=>(tab==='archive'?p.archived:!p.archived)&&[p.name,p.category].join(' ').toLowerCase().includes(query.toLowerCase())).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
- return <main className="admin-shell"><header><Logo/><div className="admin-header-links"><span>{email}</span><a href="/" target="_blank" rel="noreferrer">Открыть магазин <ExternalLink size={15}/></a><button type="button" onClick={()=>void logout()}>Выйти</button></div></header><a className="back-link" href="/"><ArrowLeft size={16}/>В каталог</a><div className="admin-title"><div><p className="eyebrow">ПАНЕЛЬ АДМИНИСТРАТОРА</p><h1>Ваш каталог</h1><p>Добавляйте новые модели, меняйте цены и управляйте наличием.</p></div><Button className="wide-button" onClick={()=>start()}><Plus/>Добавить товар</Button></div><div className="stats"><div><Package/><span>В каталоге<strong>{products.filter(p=>!p.archived).length}</strong></span></div><div><Check/><span>В наличии<strong>{products.filter(p=>!p.archived&&p.stock==='В наличии').length}</strong></span></div><div><Tag/><span>Категории<strong>{new Set(products.filter(p=>!p.archived).map(p=>p.category)).size}</strong></span></div></div>
- <div className="admin-toolbar"><div className="tabs"><button className={tab==='active'?'active':''} onClick={()=>setTab('active')}>Товары</button><button className={tab==='archive'?'active':''} onClick={()=>setTab('archive')}>Архив</button></div><div className="admin-search"><Search size={17}/><Input placeholder="Поиск по названию или категории" aria-label="Поиск товаров" value={query} onChange={e=>setQuery(e.target.value)}/></div></div>
- {notice&&<div className="success-banner" role="status"><Check size={17}/>{notice}</div>}{error&&<div className="error-banner" role="alert">{error}<Button variant="outline" onClick={()=>refresh().catch(e=>setError(e.message))}>Повторить</Button></div>}
- {products.some(p=>p.demo)&&<p className="demo-note">Демонстрационные товары отмечены меткой «Пример». Замените фото и характеристики и снимите метку, либо переместите примеры в архив.</p>}
- <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Товар</th><th>Категория</th><th>Цена</th><th>Наличие</th><th><span className="sr-only">Действия</span></th></tr></thead><tbody>{listed.map(p=><tr key={p.id}><td><div className="table-product"><img src={p.image} alt={p.name} onError={e=>{e.currentTarget.src='/image-unavailable.svg'}}/><div><strong>{p.name}</strong><small>{p.material}{p.colors.length>0&&' · '+p.colors.join(', ')}</small>{p.demo&&<span className="example-tag">Пример</span>}</div></div></td><td>{p.category}</td><td>{money(p.price)}{p.oldPrice&&<del>{money(p.oldPrice)}</del>}</td><td><span className={p.stock==='В наличии'?'stock-tag':'order-tag'}>{p.stock}</span></td><td><div className="row-actions"><Button variant="ghost" size="icon" aria-label={'Редактировать '+p.name} onClick={()=>start(p)}><Pencil/></Button><Button variant="ghost" size="icon" disabled={actionId===p.id} aria-label={(p.archived?'Восстановить ':'Скрыть ')+p.name} onClick={()=>archive(p)}>{p.archived?<RotateCcw/>:<Archive/>}</Button></div></td></tr>)}</tbody></table>{listed.length===0&&<div className="empty-state"><Package size={36}/><h3>{query?'Ничего не найдено':tab==='archive'?'Архив пуст':'Добавьте первый товар'}</h3><p>{query?'Попробуйте другое название.':tab==='archive'?'Скрытые товары можно восстановить здесь.':'Нажмите «Добавить товар», загрузите фото и заполните характеристики.'}</p></div>}</div>
- <Dialog open={dialog} onOpenChange={v=>{if(!busy&&!uploading&&!photoEditor)setDialog(v)}}><DialogContent className="editor-dialog"><DialogTitle>{editing?'Редактирование товара':'Новый товар'}</DialogTitle><DialogDescription>Фото и характеристики появятся в каталоге после сохранения.</DialogDescription><form onSubmit={save} className="product-form"><div className="form-image"><label>Фото для цвета<select aria-label="Фото для цвета" value={photoColor} disabled={busy||uploading} onChange={e=>selectPhotoColor(e.target.value)}>{!draft.colors.length&&<option value="">Фото товара</option>}{draft.colors.map(c=><option key={c} value={c}>{c}</option>)}</select></label><div className="image-preview">{previewImage?<img key={previewImage} src={previewImage} alt="Предпросмотр фото" onError={e=>{e.currentTarget.src='/image-unavailable.svg'}}/>:<><ImagePlus size={36}/><span>{photoColor?"Фото: "+photoColor:"Фотография товара"}</span></>}</div>{photoColor&&gallery.length>0&&<div className="admin-photo-gallery" role="group" aria-label={'Фотографии: '+photoColor}>{gallery.map((photo,i)=><button type="button" key={photo} className={i===photoIndex?'selected':''} aria-label={'Фото '+(i+1)+' для цвета '+photoColor} aria-pressed={i===photoIndex} disabled={busy||uploading} onClick={()=>setPhotoIndex(i)}><img src={photo} alt="" onError={e=>{e.currentTarget.src='/image-unavailable.svg'}}/>{photo===draft.image&&<span>Основное</span>}</button>)}</div>}{previewImage&&<Button type="button" variant="outline" disabled={busy||uploading} onClick={()=>setPhotoEditor({source:previewImage,color:photoColor,replace:true,index:photoIndex})}><Pencil size={16}/>Кадрировать и переместить</Button>}{photoColor&&previewImage&&<Button type="button" variant="outline" disabled={busy||uploading} onClick={removePhoto}>Удалить выбранное фото</Button>}<label className="upload-label"><ImagePlus size={16}/>{uploading?'Загрузка…':photoColor?'Добавить фото: '+photoColor:'Добавить фото товара'}<input type="file" aria-label={photoColor?"Загрузить фото: "+photoColor:"Добавить фото товара"} accept="image/jpeg,image/png,image/webp" disabled={busy||uploading} onChange={e=>{choosePhoto(e.target.files?.[0]);e.target.value=''}}/></label><p className="demo-note">JPG, PNG или WebP · до 8 МБ</p><label>Или ссылка на фото<Input placeholder="https://…" aria-label={photoColor?"Ссылка на фото: "+photoColor:"Ссылка на фото товара"} value={photoUrl} disabled={busy||uploading} onChange={e=>setPhotoUrl(e.target.value)}/></label><Button type="button" variant="outline" disabled={busy||uploading||!photoUrl.trim()} onClick={addPhotoUrl}>Добавить по ссылке</Button><p className="color-hint">{photoColor?"Фото для цвета «"+photoColor+"»: "+gallery.length+" из "+MAX_COLOR_PHOTOS+". Первое фото цвета показывается в каталоге.":"Выберите цвет, чтобы добавить фотографии для него."}</p></div><div className="form-fields"><label>Название товара <span>*</span><Input required maxLength={100} placeholder="Например, Classic Wine" value={draft.name} onChange={e=>setDraft({...draft,name:e.target.value})}/></label><div className="form-pair"><label>Категория<select value={draft.category} onChange={e=>setDraft({...draft,category:e.target.value})}>{categories.map(c=><option key={c}>{c}</option>)}</select></label><label>Материал<select value={draft.material} onChange={e=>setDraft({...draft,material:e.target.value})}>{materials.map(c=><option key={c}>{c}</option>)}</select></label></div><div className="form-pair"><label>Цена, ₽ <span>*</span><Input required type="number" min="0.01" max="10000000" step="0.01" value={draft.price||''} onChange={e=>setDraft({...draft,price:Number(e.target.value)})}/></label><label>Старая цена, ₽<Input type="number" min="0.01" max="10000000" step="0.01" value={draft.oldPrice??''} placeholder="Если есть скидка" onChange={e=>setDraft({...draft,oldPrice:e.target.value?Number(e.target.value):null})}/></label></div><fieldset><legend>Цвета (необязательно)</legend><div className="color-options">{colors.map(c=><label key={c.name} className={draft.colors.includes(c.name)?'selected':''}><input type="checkbox" checked={draft.colors.includes(c.name)} disabled={busy||uploading} onChange={()=>toggleColor(c.name)}/><span style={{background:c.hex}}/>{c.name}</label>)}</div><p className="color-hint">Все цвета будут в одной карточке. Нажмите на цвет ниже, чтобы добавить его фото.</p>{draft.colors.length>0&&<div className="variant-photos">{draft.colors.map(c=><button type="button" key={c} className={photoColor===c?"selected":""} disabled={busy||uploading} aria-pressed={photoColor===c} onClick={()=>selectPhotoColor(c)}><img key={draft.colorImages?.[c]||c} src={draft.colorImages?.[c]||"/image-unavailable.svg"} alt={"Фото: "+c} onError={e=>{e.currentTarget.src="/image-unavailable.svg"}}/><span>{c}<small>{draft.colorImages?.[c]?(draft.colorImages[c]===draft.image?"Основное фото":"Своё фото"):"Добавьте фото"}</small></span></button>)}</div>}</fieldset><div className="form-pair"><label>Наличие<select value={draft.stock} onChange={e=>setDraft({...draft,stock:e.target.value as Product['stock']})}><option>В наличии</option><option>Под заказ</option></select></label><label>Метка<select value={draft.badge} onChange={e=>setDraft({...draft,badge:e.target.value})}><option value="">Без метки</option><option>Хит</option><option>Новинка</option><option>Limited</option>{draft.badge&&!['Хит','Новинка','Limited'].includes(draft.badge)&&<option>{draft.badge}</option>}</select></label></div><label>Размер сумки (необязательно)<Input maxLength={100} placeholder="Например, 30 × 20 × 12 см" value={draft.size} onChange={e=>setDraft({...draft,size:e.target.value})}/></label><label>Описание (необязательно)<textarea maxLength={5000} rows={4} placeholder="Детали, уход и особенности модели" value={draft.description} onChange={e=>setDraft({...draft,description:e.target.value})}/></label><label className="check-row"><input type="checkbox" checked={draft.demo} onChange={e=>setDraft({...draft,demo:e.target.checked})}/>Демонстрационный товар</label></div><div className="form-footer">{formError&&<p className="field-error" role="alert">{formError}</p>}<Button variant="outline" type="button" disabled={busy||uploading} onClick={()=>setDialog(false)}>Отмена</Button><Button type="submit" disabled={busy||uploading}>{busy?'Сохраняем…':'Сохранить товар'}</Button></div></form>{photoEditor&&<PhotoEditor selection={photoEditor} onApply={uploadEditedPhoto} onCancel={()=>setPhotoEditor(null)}/>}</DialogContent></Dialog></main>
+"use client";
+import { Logo } from "@/components/logo";
+import { useState, type FormEvent } from "react";
+import {
+  ArrowLeft,
+  Plus,
+  Search,
+  Pencil,
+  Archive,
+  RotateCcw,
+  ImagePlus,
+  ExternalLink,
+  Check,
+  Package,
+  Tag,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  categories,
+  materials,
+  colors,
+  money,
+  MAX_COLOR_PHOTOS,
+  type Product,
+} from "@/lib/products";
+import {
+  setProductPhoto,
+  editProductPhoto,
+  toggleProductColor,
+  assignedColorPhotos,
+  addColorPhoto,
+  replaceColorPhoto,
+  removeColorPhoto,
+} from "@/lib/product-photos";
+import {
+  PhotoEditor,
+  type PhotoEditorSelection,
+} from "@/components/photo-editor";
+const blank = {
+  name: "",
+  category: "Сумки",
+  material: "Экокожа",
+  colors: [],
+  colorImages: {},
+  price: 0,
+  oldPrice: null,
+  description: "",
+  size: "",
+  image: "",
+  stock: "В наличии",
+  badge: "",
+  demo: false,
+} as Omit<Product, "id" | "archived" | "createdAt">;
+export default function AdminPanel({
+  initialProducts,
+  email,
+  initialError = "",
+}: {
+  initialProducts: Product[];
+  email: string;
+  initialError?: string;
+}) {
+  const [photoColor, setPhotoColor] = useState("");
+  const [photoIndex, setPhotoIndex] = useState(0),
+    [photoUrl, setPhotoUrl] = useState("");
+  const [photoEditor, setPhotoEditor] = useState<PhotoEditorSelection | null>(
+    null,
+  );
+  const [products, setProducts] = useState(initialProducts),
+    [query, setQuery] = useState(""),
+    [tab, setTab] = useState("active"),
+    [dialog, setDialog] = useState(false),
+    [editing, setEditing] = useState<string | null>(null),
+    [draft, setDraft] = useState({ ...blank }),
+    [error, setError] = useState(initialError),
+    [formError, setFormError] = useState(""),
+    [busy, setBusy] = useState(false),
+    [uploading, setUploading] = useState(false),
+    [notice, setNotice] = useState(""),
+    [actionId, setActionId] = useState("");
+  async function refresh() {
+    const r = await fetch("/api/products?all=1");
+    const data = (await r.json()) as Product[] & { error?: string };
+    if (!r.ok) throw new Error(data.error);
+    setProducts(data);
+    setError("");
+  }
+  function start(p?: Product) {
+    setEditing(p?.id || null);
+    setPhotoColor(p?.colors[0] ?? "");
+    setPhotoIndex(0);
+    setPhotoUrl("");
+    setDraft(
+      p
+        ? {
+            ...p,
+            size: p.size ?? "",
+            colors: [...p.colors],
+            colorImages: {
+              ...p.colorImages,
+              ...(!Object.keys(p.colorImages ?? {}).length && p.colors[0]
+                ? { [p.colors[0]]: p.image }
+                : {}),
+            },
+            colorPhotos: { ...p.colorPhotos },
+          }
+        : { ...blank, colors: [], colorImages: {} },
+    );
+    setFormError("");
+    setDialog(true);
+    setNotice("");
+  }
+  async function save(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (busy || uploading) return;
+    if (!draft.image.trim()) {
+      setPhotoColor(draft.colors[0] ?? "");
+      setFormError("Загрузите первое фото товара");
+      return;
+    }
+    setBusy(true);
+    setFormError("");
+    try {
+      const r = await fetch(
+        editing ? "/api/products/" + editing : "/api/products",
+        {
+          method: editing ? "PUT" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(draft),
+        },
+      );
+      const data = (await r.json()) as Product & { error?: string };
+      if (!r.ok) throw new Error(data.error);
+      setProducts((prev) =>
+        editing
+          ? prev.map((p) => (p.id === editing ? data : p))
+          : [data, ...prev],
+      );
+      setDialog(false);
+      setNotice(editing ? "Изменения сохранены" : "Товар добавлен в каталог");
+    } catch (e) {
+      setFormError(
+        e instanceof Error ? e.message : "Не удалось сохранить товар",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  function selectPhotoColor(color: string) {
+    setPhotoColor(color);
+    setPhotoIndex(0);
+    setPhotoUrl("");
+    setFormError("");
+  }
+  function toggleColor(color: string) {
+    const selected = draft.colors.includes(color);
+    setDraft((d) => toggleProductColor(d, color));
+    if (!selected) selectPhotoColor(color);
+    else if (photoColor === color)
+      selectPhotoColor(draft.colors.find((c) => c !== color) ?? "");
+  }
+  const gallery = photoColor
+    ? assignedColorPhotos(draft, photoColor)
+    : draft.image
+      ? [draft.image]
+      : [];
+  const previewImage = gallery[photoIndex] ?? gallery[0];
+  function addPhotoUrl() {
+    const image = photoUrl.trim();
+    try {
+      const url = new URL(image);
+      if (url.protocol !== "https:") throw new Error();
+    } catch {
+      setFormError("Укажите ссылку на фото, начинающуюся с https://");
+      return;
+    }
+    if (image.length > 2000) {
+      setFormError("Ссылка на фото слишком длинная");
+      return;
+    }
+    if (gallery.includes(image)) {
+      setFormError("Это фото уже добавлено");
+      return;
+    }
+    if (photoColor && gallery.length >= MAX_COLOR_PHOTOS) {
+      setFormError("Для каждого цвета можно добавить до 10 фотографий");
+      return;
+    }
+    setDraft((d) =>
+      photoColor
+        ? addColorPhoto(d, image, photoColor)
+        : setProductPhoto(d, image),
+    );
+    setPhotoIndex(photoColor ? gallery.length : 0);
+    setPhotoUrl("");
+    setFormError("");
+  }
+  function removePhoto() {
+    if (!photoColor) return;
+    setDraft((d) => removeColorPhoto(d, photoColor, photoIndex));
+    setPhotoIndex(Math.max(0, Math.min(photoIndex, gallery.length - 2)));
+    setFormError("");
+  }
+  function choosePhoto(file?: File) {
+    if (!file) return;
+    setFormError("");
+    if (photoColor && gallery.length >= MAX_COLOR_PHOTOS) {
+      setFormError("Для каждого цвета можно добавить до 10 фотографий");
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setFormError("Максимальный размер фото — 8 МБ");
+      return;
+    }
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setFormError("Поддерживаются только JPG, PNG и WebP");
+      return;
+    }
+    setPhotoEditor({ source: file, color: photoColor, replace: false });
+  }
+  async function uploadEditedPhoto(file: File) {
+    if (!photoEditor) return;
+    const selection = photoEditor;
+    setUploading(true);
+    setFormError("");
+    try {
+      if (file.size > 8 * 1024 * 1024)
+        throw new Error("Максимальный размер фото — 8 МБ");
+      const form = new FormData();
+      form.append("file", file);
+      const r = await fetch("/api/upload", { method: "POST", body: form });
+      const data = (await r.json()) as { image: string; error?: string };
+      if (!r.ok) throw new Error(data.error || "Не удалось загрузить фото");
+      setDraft((d) =>
+        selection.color
+          ? selection.replace
+            ? replaceColorPhoto(
+                d,
+                data.image,
+                selection.color,
+                selection.index ?? 0,
+              )
+            : addColorPhoto(d, data.image, selection.color)
+          : selection.replace
+            ? editProductPhoto(d, data.image)
+            : setProductPhoto(d, data.image),
+      );
+      if (selection.color && !selection.replace) setPhotoIndex(gallery.length);
+      setPhotoEditor(null);
+    } finally {
+      setUploading(false);
+    }
+  }
+  async function archive(p: Product) {
+    setActionId(p.id);
+    setError("");
+    try {
+      const r = await fetch("/api/products/" + p.id, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived: !p.archived }),
+      });
+      const data = (await r.json()) as { error?: string };
+      if (!r.ok) throw new Error(data.error);
+      setProducts((prev) =>
+        prev.map((x) => (x.id === p.id ? { ...x, archived: !p.archived } : x)),
+      );
+      setNotice(
+        p.archived
+          ? "Товар возвращён в каталог"
+          : "Товар скрыт из каталога. Его можно восстановить в архиве.",
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось изменить статус");
+    } finally {
+      setActionId("");
+    }
+  }
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    window.location.assign("/");
+  }
+  const listed = products
+    .filter(
+      (p) =>
+        (tab === "archive" ? p.archived : !p.archived) &&
+        [p.name, p.category]
+          .join(" ")
+          .toLowerCase()
+          .includes(query.toLowerCase()),
+    )
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return (
+    <main className="admin-shell">
+      <header>
+        <Logo />
+        <div className="admin-header-links">
+          <span>{email}</span>
+          <a href="/" target="_blank" rel="noreferrer">
+            Открыть магазин <ExternalLink size={15} />
+          </a>
+          <button type="button" onClick={() => void logout()}>
+            Выйти
+          </button>
+        </div>
+      </header>
+      <a className="back-link" href="/">
+        <ArrowLeft size={16} />В каталог
+      </a>
+      <div className="admin-title">
+        <div>
+          <p className="eyebrow">ПАНЕЛЬ АДМИНИСТРАТОРА</p>
+          <h1>Ваш каталог</h1>
+          <p>Добавляйте новые модели, меняйте цены и управляйте наличием.</p>
+        </div>
+        <Button className="wide-button" onClick={() => start()}>
+          <Plus />
+          Добавить товар
+        </Button>
+      </div>
+      <div className="stats">
+        <div>
+          <Package />
+          <span>
+            В каталоге
+            <strong>{products.filter((p) => !p.archived).length}</strong>
+          </span>
+        </div>
+        <div>
+          <Check />
+          <span>
+            В наличии
+            <strong>
+              {
+                products.filter((p) => !p.archived && p.stock === "В наличии")
+                  .length
+              }
+            </strong>
+          </span>
+        </div>
+        <div>
+          <Tag />
+          <span>
+            Категории
+            <strong>
+              {
+                new Set(
+                  products.filter((p) => !p.archived).map((p) => p.category),
+                ).size
+              }
+            </strong>
+          </span>
+        </div>
+      </div>
+      <div className="admin-toolbar">
+        <div className="tabs">
+          <button
+            className={tab === "active" ? "active" : ""}
+            onClick={() => setTab("active")}
+          >
+            Товары
+          </button>
+          <button
+            className={tab === "archive" ? "active" : ""}
+            onClick={() => setTab("archive")}
+          >
+            Архив
+          </button>
+        </div>
+        <div className="admin-search">
+          <Search size={17} />
+          <Input
+            placeholder="Поиск по названию или категории"
+            aria-label="Поиск товаров"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+      </div>
+      {notice && (
+        <div className="success-banner" role="status">
+          <Check size={17} />
+          {notice}
+        </div>
+      )}
+      {error && (
+        <div className="error-banner" role="alert">
+          {error}
+          <Button
+            variant="outline"
+            onClick={() => refresh().catch((e) => setError(e.message))}
+          >
+            Повторить
+          </Button>
+        </div>
+      )}
+      {products.some((p) => p.demo) && (
+        <p className="demo-note">
+          Демонстрационные товары отмечены меткой «Пример». Замените фото и
+          характеристики и снимите метку, либо переместите примеры в архив.
+        </p>
+      )}
+      <div className="admin-table-wrap">
+        <table className="admin-table">
+          <thead>
+            <tr>
+              <th>Товар</th>
+              <th>Категория</th>
+              <th>Цена</th>
+              <th>Наличие</th>
+              <th>
+                <span className="sr-only">Действия</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {listed.map((p) => (
+              <tr key={p.id}>
+                <td>
+                  <div className="table-product">
+                    <img
+                      src={p.image}
+                      alt={p.name}
+                      onError={(e) => {
+                        e.currentTarget.src = "/image-unavailable.svg";
+                      }}
+                    />
+                    <div>
+                      <strong>{p.name}</strong>
+                      <small>
+                        {p.material}
+                        {p.colors.length > 0 && " · " + p.colors.join(", ")}
+                      </small>
+                      {p.demo && <span className="example-tag">Пример</span>}
+                    </div>
+                  </div>
+                </td>
+                <td>{p.category}</td>
+                <td>
+                  {money(p.price)}
+                  {p.oldPrice && <del>{money(p.oldPrice)}</del>}
+                </td>
+                <td>
+                  <span
+                    className={
+                      p.stock === "В наличии" ? "stock-tag" : "order-tag"
+                    }
+                  >
+                    {p.stock}
+                  </span>
+                </td>
+                <td>
+                  <div className="row-actions">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={"Редактировать " + p.name}
+                      onClick={() => start(p)}
+                    >
+                      <Pencil />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      disabled={actionId === p.id}
+                      aria-label={
+                        (p.archived ? "Восстановить " : "Скрыть ") + p.name
+                      }
+                      onClick={() => archive(p)}
+                    >
+                      {p.archived ? <RotateCcw /> : <Archive />}
+                    </Button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {listed.length === 0 && (
+          <div className="empty-state">
+            <Package size={36} />
+            <h3>
+              {query
+                ? "Ничего не найдено"
+                : tab === "archive"
+                  ? "Архив пуст"
+                  : "Добавьте первый товар"}
+            </h3>
+            <p>
+              {query
+                ? "Попробуйте другое название."
+                : tab === "archive"
+                  ? "Скрытые товары можно восстановить здесь."
+                  : "Нажмите «Добавить товар», загрузите фото и заполните характеристики."}
+            </p>
+          </div>
+        )}
+      </div>
+      <Dialog
+        open={dialog}
+        onOpenChange={(v) => {
+          if (!busy && !uploading && !photoEditor) setDialog(v);
+        }}
+      >
+        <DialogContent className="editor-dialog">
+          <DialogTitle>
+            {editing ? "Редактирование товара" : "Новый товар"}
+          </DialogTitle>
+          <DialogDescription>
+            Фото и характеристики появятся в каталоге после сохранения.
+          </DialogDescription>
+          <form onSubmit={save} className="product-form">
+            <div className="form-image">
+              <label>
+                Фото для цвета
+                <select
+                  aria-label="Фото для цвета"
+                  value={photoColor}
+                  disabled={busy || uploading}
+                  onChange={(e) => selectPhotoColor(e.target.value)}
+                >
+                  {!draft.colors.length && (
+                    <option value="">Фото товара</option>
+                  )}
+                  {draft.colors.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="image-preview">
+                {previewImage ? (
+                  <img
+                    key={previewImage}
+                    src={previewImage}
+                    alt="Предпросмотр фото"
+                    onError={(e) => {
+                      e.currentTarget.src = "/image-unavailable.svg";
+                    }}
+                  />
+                ) : (
+                  <>
+                    <ImagePlus size={36} />
+                    <span>
+                      {photoColor ? "Фото: " + photoColor : "Фотография товара"}
+                    </span>
+                  </>
+                )}
+              </div>
+              {photoColor && gallery.length > 0 && (
+                <div
+                  className="admin-photo-gallery"
+                  role="group"
+                  aria-label={"Фотографии: " + photoColor}
+                >
+                  {gallery.map((photo, i) => (
+                    <button
+                      type="button"
+                      key={photo}
+                      className={i === photoIndex ? "selected" : ""}
+                      aria-label={
+                        "Фото " + (i + 1) + " для цвета " + photoColor
+                      }
+                      aria-pressed={i === photoIndex}
+                      disabled={busy || uploading}
+                      onClick={() => setPhotoIndex(i)}
+                    >
+                      <img
+                        src={photo}
+                        alt=""
+                        onError={(e) => {
+                          e.currentTarget.src = "/image-unavailable.svg";
+                        }}
+                      />
+                      {photo === draft.image && <span>Основное</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {previewImage && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={busy || uploading}
+                  onClick={() =>
+                    setPhotoEditor({
+                      source: previewImage,
+                      color: photoColor,
+                      replace: true,
+                      index: photoIndex,
+                    })
+                  }
+                >
+                  <Pencil size={16} />
+                  Кадрировать и переместить
+                </Button>
+              )}
+              {photoColor && previewImage && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={busy || uploading}
+                  onClick={removePhoto}
+                >
+                  Удалить выбранное фото
+                </Button>
+              )}
+              <label className="upload-label">
+                <ImagePlus size={16} />
+                {uploading
+                  ? "Загрузка…"
+                  : photoColor
+                    ? "Добавить фото: " + photoColor
+                    : "Добавить фото товара"}
+                <input
+                  type="file"
+                  aria-label={
+                    photoColor
+                      ? "Загрузить фото: " + photoColor
+                      : "Добавить фото товара"
+                  }
+                  accept="image/jpeg,image/png,image/webp"
+                  disabled={busy || uploading}
+                  onChange={(e) => {
+                    choosePhoto(e.target.files?.[0]);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+              <p className="demo-note">JPG, PNG или WebP · до 8 МБ</p>
+              <label>
+                Или ссылка на фото
+                <Input
+                  placeholder="https://…"
+                  aria-label={
+                    photoColor
+                      ? "Ссылка на фото: " + photoColor
+                      : "Ссылка на фото товара"
+                  }
+                  value={photoUrl}
+                  disabled={busy || uploading}
+                  onChange={(e) => setPhotoUrl(e.target.value)}
+                />
+              </label>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy || uploading || !photoUrl.trim()}
+                onClick={addPhotoUrl}
+              >
+                Добавить по ссылке
+              </Button>
+              <p className="color-hint">
+                {photoColor
+                  ? "Фото для цвета «" +
+                    photoColor +
+                    "»: " +
+                    gallery.length +
+                    " из " +
+                    MAX_COLOR_PHOTOS +
+                    ". Первое фото цвета показывается в каталоге."
+                  : "Выберите цвет, чтобы добавить фотографии для него."}
+              </p>
+            </div>
+            <div className="form-fields">
+              <label>
+                Название товара <span>*</span>
+                <Input
+                  required
+                  maxLength={100}
+                  placeholder="Например, Classic Wine"
+                  value={draft.name}
+                  onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                />
+              </label>
+              <div className="form-pair">
+                <label>
+                  Категория
+                  <select
+                    value={draft.category}
+                    onChange={(e) =>
+                      setDraft({ ...draft, category: e.target.value })
+                    }
+                  >
+                    {categories.map((c) => (
+                      <option key={c}>{c}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Материал
+                  <select
+                    value={draft.material}
+                    onChange={(e) =>
+                      setDraft({ ...draft, material: e.target.value })
+                    }
+                  >
+                    {materials.map((c) => (
+                      <option key={c}>{c}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="form-pair">
+                <label>
+                  Цена, ₽ <span>*</span>
+                  <Input
+                    required
+                    type="number"
+                    min="0.01"
+                    max="10000000"
+                    step="0.01"
+                    value={draft.price || ""}
+                    onChange={(e) =>
+                      setDraft({ ...draft, price: Number(e.target.value) })
+                    }
+                  />
+                </label>
+                <label>
+                  Старая цена, ₽
+                  <Input
+                    type="number"
+                    min="0.01"
+                    max="10000000"
+                    step="0.01"
+                    value={draft.oldPrice ?? ""}
+                    placeholder="Если есть скидка"
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        oldPrice: e.target.value
+                          ? Number(e.target.value)
+                          : null,
+                      })
+                    }
+                  />
+                </label>
+              </div>
+              <fieldset>
+                <legend>Цвета (необязательно)</legend>
+                <div className="color-options">
+                  {colors.map((c) => (
+                    <label
+                      key={c.name}
+                      className={
+                        draft.colors.includes(c.name) ? "selected" : ""
+                      }
+                    >
+                      <input
+                        type="checkbox"
+                        checked={draft.colors.includes(c.name)}
+                        disabled={busy || uploading}
+                        onChange={() => toggleColor(c.name)}
+                      />
+                      <span style={{ background: c.hex }} />
+                      {c.name}
+                    </label>
+                  ))}
+                </div>
+                <p className="color-hint">
+                  Все цвета будут в одной карточке. Нажмите на цвет ниже, чтобы
+                  добавить его фото.
+                </p>
+                {draft.colors.length > 0 && (
+                  <div className="variant-photos">
+                    {draft.colors.map((c) => (
+                      <button
+                        type="button"
+                        key={c}
+                        className={photoColor === c ? "selected" : ""}
+                        disabled={busy || uploading}
+                        aria-pressed={photoColor === c}
+                        onClick={() => selectPhotoColor(c)}
+                      >
+                        <img
+                          key={draft.colorImages?.[c] || c}
+                          src={
+                            draft.colorImages?.[c] || "/image-unavailable.svg"
+                          }
+                          alt={"Фото: " + c}
+                          onError={(e) => {
+                            e.currentTarget.src = "/image-unavailable.svg";
+                          }}
+                        />
+                        <span>
+                          {c}
+                          <small>
+                            {draft.colorImages?.[c]
+                              ? draft.colorImages[c] === draft.image
+                                ? "Основное фото"
+                                : "Своё фото"
+                              : "Добавьте фото"}
+                          </small>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </fieldset>
+              <div className="form-pair">
+                <label>
+                  Наличие
+                  <select
+                    value={draft.stock}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        stock: e.target.value as Product["stock"],
+                      })
+                    }
+                  >
+                    <option>В наличии</option>
+                    <option>Под заказ</option>
+                  </select>
+                </label>
+                <label>
+                  Метка
+                  <select
+                    value={draft.badge}
+                    onChange={(e) =>
+                      setDraft({ ...draft, badge: e.target.value })
+                    }
+                  >
+                    <option value="">Без метки</option>
+                    <option>Хит</option>
+                    <option>Новинка</option>
+                    <option>Limited</option>
+                    {draft.badge &&
+                      !["Хит", "Новинка", "Limited"].includes(draft.badge) && (
+                        <option>{draft.badge}</option>
+                      )}
+                  </select>
+                </label>
+              </div>
+              <label>
+                Размер сумки (необязательно)
+                <Input
+                  maxLength={100}
+                  placeholder="Например, 30 × 20 × 12 см"
+                  value={draft.size}
+                  onChange={(e) => setDraft({ ...draft, size: e.target.value })}
+                />
+              </label>
+              <label>
+                Описание (необязательно)
+                <textarea
+                  maxLength={5000}
+                  rows={4}
+                  placeholder="Детали, уход и особенности модели"
+                  value={draft.description}
+                  onChange={(e) =>
+                    setDraft({ ...draft, description: e.target.value })
+                  }
+                />
+              </label>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={draft.demo}
+                  onChange={(e) =>
+                    setDraft({ ...draft, demo: e.target.checked })
+                  }
+                />
+                Демонстрационный товар
+              </label>
+            </div>
+            <div className="form-footer">
+              {formError && (
+                <p className="field-error" role="alert">
+                  {formError}
+                </p>
+              )}
+              <Button
+                variant="outline"
+                type="button"
+                disabled={busy || uploading}
+                onClick={() => setDialog(false)}
+              >
+                Отмена
+              </Button>
+              <Button type="submit" disabled={busy || uploading}>
+                {busy ? "Сохраняем…" : "Сохранить товар"}
+              </Button>
+            </div>
+          </form>
+          {photoEditor && (
+            <PhotoEditor
+              selection={photoEditor}
+              onApply={uploadEditedPhoto}
+              onCancel={() => setPhotoEditor(null)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+    </main>
+  );
 }
