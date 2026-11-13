@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "vinext dev",
-    "build": "vite build",
+    "build": "vinext build",
     "start": "node dist/standalone/server.js",
     "test": "node --experimental-vm-modules --test tests/*.test.mjs",
     "lint": "oxlint",

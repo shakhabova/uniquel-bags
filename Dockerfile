@@ -24,9 +24,12 @@ RUN apt-get update \
     && chown -R node:node /data
 
 COPY --from=build --chown=node:node /app/dist/standalone ./
-COPY --chown=root:root docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+COPY --chown=root:root docker-entrypoint.sh /usr/local/bin/uniquel-entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/uniquel-entrypoint.sh \
+    && chmod +x /usr/local/bin/uniquel-entrypoint.sh \
+    && /bin/sh -n /usr/local/bin/uniquel-entrypoint.sh \
+    && test -f /app/server.js
 
 EXPOSE 8080
-ENTRYPOINT ["docker-entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/uniquel-entrypoint.sh"]
 CMD ["node", "server.js"]

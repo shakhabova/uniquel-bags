@@ -21,6 +21,7 @@
 *.pem
 
 # debug
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -30,6 +31,7 @@ yarn-error.log*
 .env*
 
 # deployment and generated files
+*.tsbuildinfo
 .vercel
 next-env.d.ts
 /dist/
@@ -37,6 +39,7 @@ next-env.d.ts
 /outputs/
 /work/
 /data/
+/.tmp/
 
 .dev.vars*
 !.env.example
