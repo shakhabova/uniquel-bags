@@ -19,6 +19,10 @@ export function getDb() {
         data TEXT NOT NULL,
         archived INTEGER NOT NULL DEFAULT 0
       );
+      CREATE TABLE IF NOT EXISTS orders (
+        id TEXT PRIMARY KEY NOT NULL,
+        data TEXT NOT NULL
+      );
     `);
   }
 
